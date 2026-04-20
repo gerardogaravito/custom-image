@@ -1,0 +1,76 @@
+<!doctype html>
+<html lang="en">
+  <head>
+    <meta charset="UTF-8" />
+    <meta name="viewport" content="width=device-width, initial-scale=1.0" />
+    <title>custom-image</title>
+    <link rel="stylesheet" href="/src/style.css" />
+  </head>
+  <body>
+    <main id="stage">
+      <canvas id="view"></canvas>
+      <div id="drop" class="drop">
+        <label>
+          <input type="file" id="file" accept="image/*" hidden />
+          <span>drop image · or click</span>
+        </label>
+      </div>
+    </main>
+
+    <section id="tools" class="tools" hidden>
+      <header class="tools__bar">
+        <nav class="tabs">
+          <button data-tab="curves" class="tab is-active">curves</button>
+          <button data-tab="adjust" class="tab">adjust</button>
+          <button data-tab="export" class="tab">export</button>
+        </nav>
+        <button id="reset" class="ghost">reset</button>
+      </header>
+
+      <div class="panel" data-panel="curves">
+        <div class="chan">
+          <button data-chan="m" class="chan__btn is-active">master</button>
+          <button data-chan="r" class="chan__btn">r</button>
+          <button data-chan="g" class="chan__btn">g</button>
+          <button data-chan="b" class="chan__btn">b</button>
+        </div>
+        <div class="curve-wrap">
+          <canvas id="curve" width="256" height="256"></canvas>
+        </div>
+        <p class="hint">click to add · drag to move · double-click to remove</p>
+      </div>
+
+      <div class="panel" data-panel="adjust" hidden>
+        <label class="sl"><span>exposure</span><input type="range" min="-100" max="100" value="0" data-adj="exposure"/><i data-val="exposure">0</i></label>
+        <label class="sl"><span>brightness</span><input type="range" min="-100" max="100" value="0" data-adj="brightness"/><i data-val="brightness">0</i></label>
+        <label class="sl"><span>contrast</span><input type="range" min="-100" max="100" value="0" data-adj="contrast"/><i data-val="contrast">0</i></label>
+        <label class="sl"><span>highlights</span><input type="range" min="-100" max="100" value="0" data-adj="highlights"/><i data-val="highlights">0</i></label>
+        <label class="sl"><span>blacks</span><input type="range" min="-100" max="100" value="0" data-adj="blacks"/><i data-val="blacks">0</i></label>
+        <label class="sl"><span>saturation</span><input type="range" min="-100" max="100" value="0" data-adj="saturation"/><i data-val="saturation">0</i></label>
+        <label class="sl"><span>noise reduce</span><input type="range" min="0" max="100" value="0" data-adj="denoise"/><i data-val="denoise">0</i></label>
+        <label class="sl"><span>noise add</span><input type="range" min="0" max="100" value="0" data-adj="noise"/><i data-val="noise">0</i></label>
+        <label class="sl"><span>noise sat</span><input type="range" min="0" max="100" value="50" data-adj="noiseSat"/><i data-val="noiseSat">50</i></label>
+      </div>
+
+      <div class="panel" data-panel="export" hidden>
+        <div class="row">
+          <label class="sel"><span>format</span>
+            <select id="fmt"><option value="png">png</option><option value="jpeg">jpg</option></select>
+          </label>
+          <label class="sel"><span>scale</span>
+            <select id="scale">
+              <option value="0.3">0.3x</option>
+              <option value="1" selected>1x</option>
+              <option value="2">2x</option>
+              <option value="4">4x</option>
+            </select>
+          </label>
+        </div>
+        <label class="sl" id="qwrap"><span>quality</span><input type="range" min="50" max="100" value="92" id="q"/><i id="qv">92</i></label>
+        <button id="download" class="go">download</button>
+      </div>
+    </section>
+
+    <script type="module" src="/src/main.ts"></script>
+  </body>
+</html>
