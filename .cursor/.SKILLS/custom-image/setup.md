@@ -17,20 +17,24 @@ Deploy: independent Vercel project, custom domain `custom-image.garavito.dev` vi
 ## File map
 
 ```
-index.html          # shell: stage canvas, drop zone, floating tools panel
-public/favicon.png  # 64x64 PNG, served at /favicon.png by Vite
-src/style.css       # all styles, no preprocessor
-src/types.ts        # State, Adjust, Curves types + defaults
-src/curves.ts       # monotonic-cubic LUT builder + curve widget (mountCurves)
-src/pipeline.ts     # apply(src, state): ImageData → ImageData (pixel ops + blur + noise)
-src/crop.ts         # pure crop math (resize/move/fit + cropImageData)
-src/heic.ts         # HEIC detection + lazy heic2any conversion
-src/toast.ts        # toast utility (with optional inline action button)
-src/undo.ts         # generic LIFO UndoStack<T> (used by main.ts for snapshots)
-src/main.ts         # upload, preview/export rAF loop, UI wiring, undo, zoom
+index.html             # shell + full SEO/OG/JSON-LD head
+public/favicon.png     # 64x64 PNG, browser tab icon
+public/og.png          # 1200x630 social preview (Facebook, Twitter, etc.)
+public/robots.txt      # allow all crawlers + AI bots (GPTBot, ClaudeBot, etc.)
+public/llms.txt        # markdown summary for LLMs (emerging convention)
+public/sitemap.xml     # single-URL sitemap
+src/style.css          # all styles, no preprocessor
+src/types.ts           # State, Adjust, Curves types + defaults
+src/curves.ts          # monotonic-cubic LUT builder + curve widget (mountCurves)
+src/pipeline.ts        # apply(src, state): ImageData → ImageData (pixel ops + blur + noise)
+src/crop.ts            # pure crop math (resize/move/fit + cropImageData)
+src/heic.ts            # HEIC detection + lazy heic2any conversion
+src/toast.ts           # toast utility (with optional inline action button)
+src/undo.ts            # UndoStack<T> + History<T> (past + future)
+src/main.ts            # upload, preview/export rAF loop, UI wiring, undo/redo, zoom, analytics
 ```
 
-Feature-specific docs live alongside this one: `zoom.md`, `recortar.md`, `rendering.md`, `herramientas.md`, `undo.md`, `tests.md`.
+Feature-specific docs live alongside this one: `zoom.md`, `recortar.md`, `rendering.md`, `herramientas.md`, `undo.md`, `seo.md`, `tests.md`.
 
 ## Key design decisions
 

@@ -1,8 +1,15 @@
 import './style.css';
+import { inject as injectAnalytics } from '@vercel/analytics';
+import { injectSpeedInsights } from '@vercel/speed-insights';
 import { apply } from './pipeline';
 import { mountCurves } from './curves';
 import { toast } from './toast';
 import { isHeic, convertHeicToPng } from './heic';
+
+// Vercel: visit tracking + Core Web Vitals. Both auto-detect environment and
+// only send beacons in production deployments — no-op in dev.
+injectAnalytics();
+injectSpeedInsights();
 import {
   type CropBox,
   type Handle,

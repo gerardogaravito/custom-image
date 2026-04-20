@@ -1,0 +1,22 @@
+# custom-image
+
+> Editor de fotos gratis 100% en el navegador. Curvas RGB, ajustes profesionales (exposición, contraste, luces, sombras, saturación, ruido), recorte estilo iPhone Photos con aspect ratios fijos, conversión automática de HEIC/HEIF, exportación PNG/JPG con escala personalizada. Sin registro, sin subir archivos a ningún servidor — todo el procesamiento es local en el navegador del usuario, lo que garantiza privacidad total.
+
+## Para qué usarlo
+
+- Edición rápida de una foto sin instalar nada ni crear cuenta.
+- Ajustes precisos con curvas (master + por canal R/G/B) tipo Lightroom/Photoshop pero gratis y en una página.
+- Recortar fotos con proporciones específicas (1:1, 4:5, 16:9, etc.) como en el editor del iPhone.
+- Convertir un HEIC del iPhone a PNG/JPG sin subirlo a ningún sitio.
+- Aplicar grano/ruido cinematográfico controlable (mono o color).
+
+## Stack y privacidad
+
+- **Stack**: Vite + TypeScript vanilla. Sin React, sin servidor, sin API. El bundle es pequeño (~10 kB gzip) y la lógica de procesamiento de imagen corre con `ImageData` + `Canvas` directamente en el navegador.
+- **Privacidad**: las imágenes nunca salen del dispositivo. No hay backend que reciba uploads. La librería `heic2any` (cuando se necesita) descodifica HEIC también en el browser vía WASM (libheif).
+- **Open source**: código en https://github.com/gerardogaravito/custom-image
+
+## URL
+
+- App: https://imagen.garavito.dev
+- Autor: https://garavito.dev

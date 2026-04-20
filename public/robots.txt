@@ -1,0 +1,26 @@
+# custom-image — allow all crawlers, including AI agents.
+# https://imagen.garavito.dev/
+
+User-agent: *
+Allow: /
+
+# AI crawlers (some respect these explicitly)
+User-agent: GPTBot
+Allow: /
+
+User-agent: ClaudeBot
+Allow: /
+
+User-agent: PerplexityBot
+Allow: /
+
+User-agent: anthropic-ai
+Allow: /
+
+User-agent: Google-Extended
+Allow: /
+
+User-agent: CCBot
+Allow: /
+
+Sitemap: https://imagen.garavito.dev/sitemap.xml

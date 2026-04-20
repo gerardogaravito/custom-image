@@ -21,6 +21,8 @@
     "vitest": "^4.1.4"
   },
   "dependencies": {
+    "@vercel/analytics": "^2.0.1",
+    "@vercel/speed-insights": "^2.0.0",
     "heic2any": "^0.0.4"
   }
 }
