@@ -1,5 +1,5 @@
 <!doctype html>
-<html lang="en">
+<html lang="es">
   <head>
     <meta charset="UTF-8" />
     <meta name="viewport" content="width=device-width, initial-scale=1.0" />
@@ -8,21 +8,49 @@
   </head>
   <body>
     <main id="stage">
-      <canvas id="view"></canvas>
+      <div id="viewport">
+        <canvas id="view" data-zoom-mode="fit"></canvas>
+        <div id="crop-overlay" class="crop-overlay" hidden>
+          <div class="crop-shade crop-shade--top"></div>
+          <div class="crop-shade crop-shade--bottom"></div>
+          <div class="crop-shade crop-shade--left"></div>
+          <div class="crop-shade crop-shade--right"></div>
+          <div class="crop-box" data-handle="move">
+            <div class="crop-grid"></div>
+            <div class="crop-handle" data-handle="nw"></div>
+            <div class="crop-handle" data-handle="n"></div>
+            <div class="crop-handle" data-handle="ne"></div>
+            <div class="crop-handle" data-handle="e"></div>
+            <div class="crop-handle" data-handle="se"></div>
+            <div class="crop-handle" data-handle="s"></div>
+            <div class="crop-handle" data-handle="sw"></div>
+            <div class="crop-handle" data-handle="w"></div>
+          </div>
+        </div>
+      </div>
       <div id="drop" class="drop">
         <label>
           <input type="file" id="file" accept="image/*" hidden />
-          <span>drop image · or click</span>
+          <span>arrastra o busca imagen</span>
         </label>
       </div>
     </main>
 
+    <div id="zoom" class="zoom" hidden>
+      <button id="zoom-out" title="alejar (-)" aria-label="alejar">−</button>
+      <span id="zoom-level">100%</span>
+      <button id="zoom-in" title="acercar (+)" aria-label="acercar">+</button>
+      <button id="zoom-fit" title="ajustar a pantalla (0)" aria-label="ajustar a pantalla">ajustar</button>
+      <button id="zoom-100" title="tamaño real (1)" aria-label="tamaño real">1:1</button>
+    </div>
+
     <section id="tools" class="tools" hidden>
       <header class="tools__bar">
         <nav class="tabs">
-          <button data-tab="curves" class="tab is-active">curves</button>
-          <button data-tab="adjust" class="tab">adjust</button>
-          <button data-tab="export" class="tab">export</button>
+          <button data-tab="curves" class="tab is-active">curvas</button>
+          <button data-tab="adjust" class="tab">ajustes</button>
+          <button data-tab="crop" class="tab">recortar</button>
+          <button data-tab="export" class="tab">exportar</button>
         </nav>
         <button id="reset" class="ghost">reset</button>
       </header>
@@ -37,27 +65,50 @@
         <div class="curve-wrap">
           <canvas id="curve" width="256" height="256"></canvas>
         </div>
-        <p class="hint">click to add · drag to move · double-click to remove</p>
+        <p class="hint">clic para añadir · arrastra para mover · doble clic para quitar</p>
       </div>
 
       <div class="panel" data-panel="adjust" hidden>
-        <label class="sl"><span>exposure</span><input type="range" min="-100" max="100" value="0" data-adj="exposure"/><i data-val="exposure">0</i></label>
-        <label class="sl"><span>brightness</span><input type="range" min="-100" max="100" value="0" data-adj="brightness"/><i data-val="brightness">0</i></label>
-        <label class="sl"><span>contrast</span><input type="range" min="-100" max="100" value="0" data-adj="contrast"/><i data-val="contrast">0</i></label>
-        <label class="sl"><span>highlights</span><input type="range" min="-100" max="100" value="0" data-adj="highlights"/><i data-val="highlights">0</i></label>
-        <label class="sl"><span>blacks</span><input type="range" min="-100" max="100" value="0" data-adj="blacks"/><i data-val="blacks">0</i></label>
-        <label class="sl"><span>saturation</span><input type="range" min="-100" max="100" value="0" data-adj="saturation"/><i data-val="saturation">0</i></label>
-        <label class="sl"><span>noise reduce</span><input type="range" min="0" max="100" value="0" data-adj="denoise"/><i data-val="denoise">0</i></label>
-        <label class="sl"><span>noise add</span><input type="range" min="0" max="100" value="0" data-adj="noise"/><i data-val="noise">0</i></label>
-        <label class="sl"><span>noise sat</span><input type="range" min="0" max="100" value="50" data-adj="noiseSat"/><i data-val="noiseSat">50</i></label>
+        <label class="sl"><span>exposición</span><input type="range" min="-100" max="100" value="0" data-adj="exposure"/><i data-val="exposure">0</i></label>
+        <label class="sl"><span>brillo</span><input type="range" min="-100" max="100" value="0" data-adj="brightness"/><i data-val="brightness">0</i></label>
+        <label class="sl"><span>contraste</span><input type="range" min="-100" max="100" value="0" data-adj="contrast"/><i data-val="contrast">0</i></label>
+        <label class="sl"><span>luces</span><input type="range" min="-100" max="100" value="0" data-adj="highlights"/><i data-val="highlights">0</i></label>
+        <label class="sl"><span>negros</span><input type="range" min="-100" max="100" value="0" data-adj="blacks"/><i data-val="blacks">0</i></label>
+        <label class="sl"><span>saturación</span><input type="range" min="-100" max="100" value="0" data-adj="saturation"/><i data-val="saturation">0</i></label>
+        <label class="sl"><span>reducir ruido</span><input type="range" min="0" max="100" value="0" data-adj="denoise"/><i data-val="denoise">0</i></label>
+        <label class="sl"><span>añadir ruido</span><input type="range" min="0" max="100" value="0" data-adj="noise"/><i data-val="noise">0</i></label>
+        <label class="sl"><span>sat. ruido</span><input type="range" min="0" max="100" value="50" data-adj="noiseSat"/><i data-val="noiseSat">50</i></label>
+      </div>
+
+      <div class="panel" data-panel="crop" hidden>
+        <div class="crop-orient">
+          <button class="crop-orient__btn is-active" data-orient="portrait" title="vertical">▯</button>
+          <button class="crop-orient__btn" data-orient="landscape" title="horizontal">▭</button>
+        </div>
+        <div class="aspect-grid">
+          <button class="aspect-btn is-active" data-aspect="free">libre</button>
+          <button class="aspect-btn" data-aspect="original">original</button>
+          <button class="aspect-btn" data-aspect="1:1">1:1</button>
+          <button class="aspect-btn" data-aspect="9:16">9:16</button>
+          <button class="aspect-btn" data-aspect="8:10">8:10</button>
+          <button class="aspect-btn" data-aspect="5:7">5:7</button>
+          <button class="aspect-btn" data-aspect="4:5">4:5</button>
+          <button class="aspect-btn" data-aspect="3:4">3:4</button>
+          <button class="aspect-btn" data-aspect="3:5">3:5</button>
+          <button class="aspect-btn" data-aspect="2:3">2:3</button>
+        </div>
+        <div class="row">
+          <button id="crop-apply" class="go">aplicar</button>
+          <button id="crop-reset" class="ghost-bordered">restaurar</button>
+        </div>
       </div>
 
       <div class="panel" data-panel="export" hidden>
         <div class="row">
-          <label class="sel"><span>format</span>
+          <label class="sel"><span>formato</span>
             <select id="fmt"><option value="png">png</option><option value="jpeg">jpg</option></select>
           </label>
-          <label class="sel"><span>scale</span>
+          <label class="sel"><span>escala</span>
             <select id="scale">
               <option value="0.3">0.3x</option>
               <option value="1" selected>1x</option>
@@ -66,8 +117,8 @@
             </select>
           </label>
         </div>
-        <label class="sl" id="qwrap"><span>quality</span><input type="range" min="50" max="100" value="92" id="q"/><i id="qv">92</i></label>
-        <button id="download" class="go">download</button>
+        <label class="sl" id="qwrap"><span>calidad</span><input type="range" min="50" max="100" value="92" id="q"/><i id="qv">92</i></label>
+        <button id="download" class="go">descargar</button>
       </div>
     </section>
 

@@ -67,6 +67,7 @@ export type CurvesUI = {
   reset: () => void;
 };
 
+/* v8 ignore start -- DOM/canvas widget, exercised in the browser */
 export function mountCurves(canvas: HTMLCanvasElement, onChange: () => void): CurvesUI {
   const state: Curves = defaultCurves();
   let active: Channel = 'm';
@@ -198,3 +199,4 @@ export function mountCurves(canvas: HTMLCanvasElement, onChange: () => void): Cu
     },
   } as unknown as CurvesUI;
 }
+/* v8 ignore stop */
