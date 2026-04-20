@@ -5,10 +5,10 @@
     <meta name="viewport" content="width=device-width, initial-scale=1.0" />
     <meta name="theme-color" content="#0a0a0a" />
 
-    <!-- SEO -->
-    <title>Editor de fotos gratis online · custom-image</title>
-    <meta name="description" content="Editor de fotos gratis en el navegador. Curvas RGB, exposición, contraste, recorte estilo iPhone, conversión HEIC y exportación PNG/JPG. Sin registro, sin subir archivos — todo se procesa local en tu navegador." />
-    <meta name="keywords" content="editor de fotos, editor de imágenes, online, gratis, navegador, curvas RGB, recortar, HEIC, PNG, JPG, exposición, contraste, sin registro, privado" />
+    <!-- SEO — positioned as a free Lightroom alternative for desktop -->
+    <title>imagen.garavito.dev</title>
+    <meta name="description" content="Alternativa gratis a Adobe Lightroom para desktop. Editor de fotos profesional en el navegador: curvas RGB, exposición, contraste, recorte estilo iPhone, conversión HEIC. Sin registro, sin subscripción, sin Adobe — todo se procesa local." />
+    <meta name="keywords" content="alternativa Lightroom gratis, Lightroom desktop gratis, free Lightroom alternative, editor de fotos gratis, free photo editor, editor de fotos online, sin Adobe, sin subscripción, curvas RGB navegador, editor de imágenes online, photo editor browser, HEIC editor, edición fotográfica gratis, alternativa Photoshop simple" />
     <meta name="author" content="Gerardo Garavito" />
     <meta name="robots" content="index, follow" />
     <link rel="canonical" href="https://imagen.garavito.dev/" />
@@ -19,20 +19,20 @@
 
     <!-- Open Graph (Facebook, LinkedIn, WhatsApp, Slack, etc.) -->
     <meta property="og:type" content="website" />
-    <meta property="og:site_name" content="custom-image" />
+    <meta property="og:site_name" content="imagen.garavito.dev" />
     <meta property="og:url" content="https://imagen.garavito.dev/" />
-    <meta property="og:title" content="Editor de fotos gratis online · custom-image" />
-    <meta property="og:description" content="Editor de fotos en el navegador. Curvas RGB, ajustes profesionales, recorte tipo iPhone, HEIC. Sin registro, todo local." />
+    <meta property="og:title" content="imagen.garavito.dev" />
+    <meta property="og:description" content="Alternativa gratis a Adobe Lightroom para desktop. Editor de fotos en el navegador con curvas RGB, ajustes profesionales y recorte estilo iPhone. Sin Adobe, sin subscripción." />
     <meta property="og:image" content="https://imagen.garavito.dev/og.png" />
     <meta property="og:image:width" content="1200" />
     <meta property="og:image:height" content="630" />
-    <meta property="og:image:alt" content="custom-image — editor de fotos gratis" />
+    <meta property="og:image:alt" content="imagen.garavito.dev — alternativa gratis a Lightroom" />
     <meta property="og:locale" content="es_MX" />
 
     <!-- Twitter / X -->
     <meta name="twitter:card" content="summary_large_image" />
-    <meta name="twitter:title" content="Editor de fotos gratis online · custom-image" />
-    <meta name="twitter:description" content="Editor de fotos en el navegador. Curvas RGB, ajustes, recorte iPhone, HEIC. Sin registro, todo local." />
+    <meta name="twitter:title" content="imagen.garavito.dev" />
+    <meta name="twitter:description" content="Alternativa gratis a Lightroom desktop. Editor de fotos en el navegador con curvas RGB, ajustes pro y recorte tipo iPhone." />
     <meta name="twitter:image" content="https://imagen.garavito.dev/og.png" />
 
     <!-- Structured data — helps Google + AI agents (ChatGPT, Perplexity, Claude) understand the app -->
@@ -40,9 +40,10 @@
     {
       "@context": "https://schema.org",
       "@type": "WebApplication",
-      "name": "custom-image",
+      "name": "imagen.garavito.dev",
+      "alternateName": ["custom-image", "imagen garavito"],
       "url": "https://imagen.garavito.dev/",
-      "description": "Editor de fotos gratis en el navegador. Curvas RGB, ajustes profesionales, recorte estilo iPhone, conversión HEIC, exportación PNG/JPG. Sin registro ni subida — procesamiento 100% local.",
+      "description": "Alternativa gratis a Adobe Lightroom para desktop. Editor de fotos profesional en el navegador con curvas RGB, ajustes (exposición, contraste, luces, sombras, saturación, ruido), recorte estilo iPhone, conversión HEIC y exportación PNG/JPG. Sin registro, sin subscripción de Adobe, sin uploads — todo se procesa local en el navegador.",
       "applicationCategory": "MultimediaApplication",
       "applicationSubCategory": "Photo Editor",
       "operatingSystem": "Any (web browser)",
@@ -54,13 +55,15 @@
         "price": "0",
         "priceCurrency": "USD"
       },
+      "keywords": "alternativa Lightroom gratis, free Lightroom alternative, Lightroom desktop gratis, editor de fotos gratis online, free photo editor browser, sin Adobe, sin subscripción, curvas RGB, HEIC editor, recorte iPhone",
       "featureList": [
-        "Curvas de color (master + canales R, G, B) con interpolación monotónica",
-        "Ajustes: exposición, brillo, contraste, luces, negros, saturación, ruido",
+        "Curvas de color (master + canales R, G, B) con interpolación monotónica — equivalente al panel Tone Curve de Lightroom",
+        "Ajustes: exposición, brillo, contraste, luces, negros, saturación, ruido — los mismos parámetros básicos de Lightroom",
         "Recorte con aspect ratios estilo iPhone (1:1, 4:5, 3:4, 16:9, etc.)",
-        "Conversión automática de imágenes HEIC/HEIF",
+        "Conversión automática de imágenes HEIC/HEIF (formato del iPhone)",
         "Exportación PNG y JPG con escala personalizada",
-        "Procesamiento 100% local — sin uploads, sin servidor",
+        "Procesamiento 100% local — sin uploads, sin servidor, sin Adobe Creative Cloud",
+        "Sin subscripción ni cuenta — gratis y abierto",
         "Undo / redo con Cmd+Z / Cmd+Shift+Z",
         "Atajos de teclado para zoom y herramientas"
       ],
@@ -75,6 +78,25 @@
     <link rel="stylesheet" href="/src/style.css" />
   </head>
   <body>
+    <!-- Semantic content for SEO crawlers (especially those that don't execute JS)
+         and screen readers. Visually hidden via .sr-only. The page itself is a
+         SPA so without this the body would look empty to non-JS bots. -->
+    <h1 class="sr-only">imagen.garavito.dev — alternativa gratis a Adobe Lightroom para desktop</h1>
+    <p class="sr-only">
+      Editor de fotos profesional 100% en el navegador. Curvas RGB, ajustes de
+      exposición, contraste, luces, sombras, saturación y ruido. Recorte con
+      proporciones estilo iPhone Photos. Conversión automática de imágenes HEIC.
+      Exportación PNG y JPG. Sin registro, sin subscripción de Adobe Creative
+      Cloud, sin subir archivos a ningún servidor — todo el procesamiento es
+      local en tu navegador.
+    </p>
+    <noscript>
+      <h2>Esta app necesita JavaScript</h2>
+      <p>imagen.garavito.dev es un editor de fotos que corre 100% en tu navegador.
+      Activá JavaScript para usarlo. Más proyectos en
+      <a href="https://garavito.dev">garavito.dev</a>.</p>
+    </noscript>
+
     <main id="stage">
       <div id="viewport">
         <canvas id="view" data-zoom-mode="fit"></canvas>

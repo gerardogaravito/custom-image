@@ -19,6 +19,21 @@
   display: none !important;
 }
 
+/* Screen-reader / SEO content: present in the DOM but visually hidden.
+   Standard a11y pattern — DON'T use display:none (that hides from crawlers
+   and screen readers too). Used for the SEO h1/p in index.html. */
+.sr-only {
+  position: absolute;
+  width: 1px;
+  height: 1px;
+  padding: 0;
+  margin: -1px;
+  overflow: hidden;
+  clip: rect(0, 0, 0, 0);
+  white-space: nowrap;
+  border: 0;
+}
+
 html,
 body {
   height: 100%;

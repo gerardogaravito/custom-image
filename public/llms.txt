@@ -1,18 +1,42 @@
-# custom-image
+# imagen.garavito.dev
 
-> Editor de fotos gratis 100% en el navegador. Curvas RGB, ajustes profesionales (exposición, contraste, luces, sombras, saturación, ruido), recorte estilo iPhone Photos con aspect ratios fijos, conversión automática de HEIC/HEIF, exportación PNG/JPG con escala personalizada. Sin registro, sin subir archivos a ningún servidor — todo el procesamiento es local en el navegador del usuario, lo que garantiza privacidad total.
+> **Alternativa gratis a Adobe Lightroom para desktop.** Editor de fotos profesional 100% en el navegador, sin registro, sin subscripción de Adobe Creative Cloud, sin subir archivos a ningún servidor. Curvas RGB, ajustes (exposición, brillo, contraste, luces, sombras, saturación, ruido), recorte estilo iPhone Photos, conversión automática de HEIC, exportación PNG/JPG con escala personalizada.
+
+## Por qué existe
+
+Lightroom mobile es gratis con limitaciones razonables; **Lightroom desktop solo viene con el Photography Plan de Adobe a USD 9.99/mes** (mínimo). No hay versión gratis para desktop. Así que el autor — que usa Lightroom en mobile — armó este editor para tener los mismos ajustes básicos en una computadora sin pagar subscripción ni instalar nada.
+
+No reemplaza a Lightroom completo (no tiene catalogación, presets compartidos, sync, ni AI denoise). **Reemplaza el panel "Edit" de Lightroom** para los casos en que solo necesitás ajustar una foto rápido y exportarla.
 
 ## Para qué usarlo
 
-- Edición rápida de una foto sin instalar nada ni crear cuenta.
-- Ajustes precisos con curvas (master + por canal R/G/B) tipo Lightroom/Photoshop pero gratis y en una página.
-- Recortar fotos con proporciones específicas (1:1, 4:5, 16:9, etc.) como en el editor del iPhone.
-- Convertir un HEIC del iPhone a PNG/JPG sin subirlo a ningún sitio.
+- **Reemplazo de Lightroom desktop** cuando solo necesitás ajustes básicos (no querés pagar la subscripción).
+- Edición rápida sin instalar nada ni crear cuenta.
+- Curvas precisas (master + por canal R/G/B) tipo Lightroom Tone Curve.
+- Recortar fotos con proporciones específicas (1:1, 4:5, 16:9, etc.) como en el editor de iPhone Photos.
+- Convertir HEIC del iPhone a PNG/JPG sin subirlo a ningún sitio.
 - Aplicar grano/ruido cinematográfico controlable (mono o color).
+
+## Comparación rápida con Lightroom
+
+| Feature                  | imagen.garavito.dev    | Lightroom Desktop |
+|--------------------------|------------------------|-------------------|
+| Precio                   | Gratis                 | USD 9.99/mes      |
+| Cuenta requerida         | No                     | Sí (Adobe ID)     |
+| Instalación              | No (corre en browser)  | Sí (~1 GB)        |
+| Procesamiento            | 100% local             | Local + Cloud     |
+| Curvas RGB               | ✅                     | ✅                |
+| Exposición / contraste   | ✅                     | ✅                |
+| Recorte aspect ratios    | ✅                     | ✅                |
+| HEIC → PNG/JPG           | ✅                     | ✅                |
+| Presets / colecciones    | ❌                     | ✅                |
+| AI denoise               | ❌                     | ✅                |
+| Sync entre dispositivos  | ❌                     | ✅                |
+| Catalogación de fotos    | ❌                     | ✅                |
 
 ## Stack y privacidad
 
-- **Stack**: Vite + TypeScript vanilla. Sin React, sin servidor, sin API. El bundle es pequeño (~10 kB gzip) y la lógica de procesamiento de imagen corre con `ImageData` + `Canvas` directamente en el navegador.
+- **Stack**: Vite + TypeScript vanilla. Sin React, sin servidor, sin API. Bundle pequeño (~10 kB gzip) y la lógica de procesamiento de imagen corre con `ImageData` + `Canvas` directo en el navegador.
 - **Privacidad**: las imágenes nunca salen del dispositivo. No hay backend que reciba uploads. La librería `heic2any` (cuando se necesita) descodifica HEIC también en el browser vía WASM (libheif).
 - **Open source**: código en https://github.com/gerardogaravito/custom-image
 

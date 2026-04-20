@@ -2,6 +2,34 @@
 
 Cómo está configurado el sitio para que lo encuentren buscadores y agentes de IA, cómo se ve cuando lo comparten en redes, y cómo se miden visitas.
 
+## Estrategia de posicionamiento
+
+**Angle principal**: alternativa gratis a Adobe Lightroom para desktop. El insight: Lightroom mobile es gratis, pero Lightroom desktop solo viene con el Photography Plan de Adobe (USD 9.99/mes mínimo). No existe una versión gratis para computadora con los mismos ajustes básicos — ese es el hueco que llenamos.
+
+Todo el copy de SEO empuja este mensaje:
+
+- **`<title>`**: `imagen.garavito.dev` (literal, decisión del producto — brand-style, no descriptivo).
+- **`<meta description>`**: empieza con "Alternativa gratis a Adobe Lightroom para desktop". Esto es lo que sale en los resultados de Google.
+- **`<meta keywords>`**: términos en español e inglés — "alternativa Lightroom gratis", "Lightroom desktop gratis", "free Lightroom alternative", "sin Adobe", "sin subscripción".
+- **JSON-LD**: `description` y `featureList` enfatizan el paralelismo con features de Lightroom ("equivalente al panel Tone Curve", "los mismos parámetros básicos de Lightroom", "sin Adobe Creative Cloud").
+- **`llms.txt`**: tiene una sección **Comparación rápida con Lightroom** (tabla) y la historia del origen. Esto es lo que agentes de IA (ChatGPT, Claude, Perplexity) leen cuando el usuario pregunta cosas como "qué editor uso si no quiero pagar Lightroom".
+
+### Por qué este angle específico
+
+Las palabras clave genéricas ("editor de fotos gratis") tienen competencia brutal (Canva, Photopea, Pixlr, Fotor, etc.). Apuntar a **intents más específicos** — la gente que busca explícitamente una alternativa a Lightroom — da mejor ROI porque hay menos resultados y más intent matching. La tabla comparativa en `llms.txt` + el bloque "Por qué existe" es exactamente lo que LLMs citan cuando responden "dame alternativas gratis a Lightroom".
+
+Si en el futuro agregás una feature que Lightroom tampoco tiene, seguir el mismo patrón: mencionar en `description` + `featureList` + `llms.txt`.
+
+## Contenido semántico para crawlers sin JS
+
+El sitio es una SPA vanilla TS. Sin JavaScript, el `<body>` prácticamente no tiene contenido útil — solo el shell del canvas. Los crawlers antiguos (y algunos bots de IA) no ejecutan JS, así que verían una página vacía.
+
+Solución: `<h1 class="sr-only">` + `<p class="sr-only">` con contenido descriptivo al principio del body, más un bloque `<noscript>` con fallback. La clase `.sr-only` es el patrón a11y estándar (posición absoluta + clip de 1×1px) — invisible visualmente pero **presente en el DOM** para screen readers y crawlers. **No usar `display: none`** porque eso esconde el contenido también de los bots.
+
+Contenido actual del h1 sr-only: "imagen.garavito.dev — alternativa gratis a Adobe Lightroom para desktop". Todos los keywords importantes.
+
+## Dominio
+
 ## Dominio
 
 - **Producción**: `https://imagen.garavito.dev` (CNAME en GoDaddy → `*.vercel-dns-017.com`).
