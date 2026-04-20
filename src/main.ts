@@ -593,6 +593,32 @@ function nextDownloadName(base: string, ext: string): string {
   return `${base}_${String(next).padStart(2, '0')}.${ext}`;
 }
 
+// On touch devices, prefer Web Share API so the image hits the iOS/Android
+// share sheet — where "Guardar imagen" puts it in the Photos camera roll.
+// `<a download>` alone only saves to Downloads/Files, not Photos.
+async function saveImage(blob: Blob, filename: string): Promise<'shared' | 'downloaded' | 'cancelled'> {
+  const isTouch = matchMedia('(hover: none)').matches;
+  if (isTouch && typeof navigator !== 'undefined' && 'canShare' in navigator) {
+    const file = new File([blob], filename, { type: blob.type });
+    if (navigator.canShare({ files: [file] })) {
+      try {
+        await navigator.share({ files: [file] });
+        return 'shared';
+      } catch (err) {
+        if (err instanceof Error && err.name === 'AbortError') return 'cancelled';
+        // Any other error → fall through to the download path
+      }
+    }
+  }
+  const url = URL.createObjectURL(blob);
+  const a = document.createElement('a');
+  a.href = url;
+  a.download = filename;
+  a.click();
+  setTimeout(() => URL.revokeObjectURL(url), 1000);
+  return 'downloaded';
+}
+
 function syncQuality() { qwrap.hidden = fmt.value === 'png'; }
 fmt.addEventListener('change', syncQuality);
 q.addEventListener('input', () => { qv.textContent = q.value; });
@@ -622,13 +648,11 @@ download.addEventListener('click', async () => {
     const type = fmt.value === 'png' ? 'image/png' : 'image/jpeg';
     const quality = fmt.value === 'png' ? undefined : Number(q.value) / 100;
     const blob = await out.toBlob(type, quality);
-    const url = URL.createObjectURL(blob);
-    const a = document.createElement('a');
-    a.href = url;
-    a.download = nextDownloadName(sourceName, fmt.value === 'png' ? 'png' : 'jpg');
-    a.click();
-    setTimeout(() => URL.revokeObjectURL(url), 1000);
-    toast('Descarga lista.', { kind: 'success' });
+    const filename = nextDownloadName(sourceName, fmt.value === 'png' ? 'png' : 'jpg');
+    const result = await saveImage(blob, filename);
+    if (result === 'shared') toast('imagen guardada', { kind: 'success' });
+    else if (result === 'downloaded') toast('descarga lista', { kind: 'success' });
+    // 'cancelled' (user closed the share sheet) → no toast
   } catch (err) {
     console.error('[download]', err);
     const msg = err instanceof Error ? err.message : 'Error al exportar.';

@@ -123,7 +123,19 @@ Helper `makeCanvas(w, h)` decide entre `OffscreenCanvas` (preferido) y `HTMLCanv
 
 El counter no se resetea al cargar una imagen nueva: si subís otra foto distinta, su `sourceName` no estará en el Map y arranca en `_01`. Si recargás la misma imagen en la misma sesión, continúa donde estaba.
 
-Toasts: "Descarga lista." en éxito, error específico si falla la conversión.
+### Destino del archivo: Photos (mobile) vs Downloads (desktop)
+
+`saveImage(blob, filename)` routea según el dispositivo:
+
+- **Touch devices** (`matchMedia('(hover: none)')` + `navigator.canShare({ files })`): abre el **share sheet nativo** vía Web Share API. En iOS Safari el usuario ve "Guardar imagen" → va directo al carrete de Photos. En Android Chrome, "Save image" → Gallery. Esto es lo único que hace que el archivo termine en la app Fotos del iPhone — `<a download>` solo lo manda a la carpeta de Downloads/Files.
+- **Desktop o browsers sin Web Share**: `<a download>` tradicional → browser default (Downloads folder).
+
+Si el usuario cancela el share sheet, `navigator.share` rechaza con `AbortError`. No mostramos toast (evita ruido). Si `canShare` devuelve false o la API falla por otra razón, cae al fallback de `<a download>`.
+
+Toasts diferentes según el camino:
+- `'imagen guardada'` si el share se completó (mobile)
+- `'descarga lista'` si fue download directo (desktop)
+- nada si se canceló el share sheet
 
 ## Reset (con undo)
 
@@ -170,6 +182,14 @@ Tunings actuales:
 - font-size 12px en ambos
 
 Si necesitás más espacio: subí el width a 360px y aflojá los paddings. No es sagrado el 320 — solo era el valor histórico.
+
+## Mobile: panel translúcido
+
+En touch devices (`@media (hover: none)`) los paneles flotantes (`.tools` y `.zoom`) usan `backdrop-filter: blur(16px) saturate(140%)` con background `rgba(17, 17, 17, 0.72)`. Efecto frosted glass estilo iOS — el usuario sigue viendo la imagen detrás del menú mientras edita.
+
+**En desktop no se aplica** (`hover: hover` no matchea el media query). La pantalla tiene espacio de sobra, el panel ocupa solo 320px, y la imagen se ve bien al lado. Mantener el fondo sólido en desktop evita pérdida de contraste innecesaria.
+
+Firefox soporta `backdrop-filter` desde v103 (julio 2022). Browsers más viejos caen al `background: rgba(...)` solo (semi-transparente sin blur) — no óptimo pero sigue siendo más legible que el fondo sólido ocupando la vista.
 
 ## Estética
 
