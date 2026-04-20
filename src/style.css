@@ -164,3 +164,34 @@ select {
 }
 .go:hover { filter: brightness(0.9); }
 .go:disabled { background: var(--line); color: var(--dim); cursor: not-allowed; }
+
+.toast-stack {
+  position: fixed;
+  left: 24px;
+  bottom: 24px;
+  display: flex;
+  flex-direction: column;
+  gap: 8px;
+  z-index: 100;
+  pointer-events: none;
+  max-width: min(420px, calc(100vw - 48px));
+}
+.toast {
+  pointer-events: auto;
+  background: var(--panel);
+  border: 1px solid var(--line);
+  border-left: 2px solid var(--dim);
+  color: var(--fg);
+  padding: 10px 14px;
+  font-size: 11px;
+  letter-spacing: 0.05em;
+  cursor: pointer;
+  opacity: 0;
+  transform: translateY(8px);
+  transition: opacity 160ms ease, transform 160ms ease;
+}
+.toast.is-in { opacity: 1; transform: translateY(0); }
+.toast.is-out { opacity: 0; transform: translateY(8px); }
+.toast--success { border-left-color: var(--accent); }
+.toast--error { border-left-color: #ff3b30; }
+

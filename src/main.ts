@@ -1,6 +1,7 @@
 import './style.css';
 import { apply } from './pipeline';
 import { mountCurves } from './curves';
+import { toast } from './toast';
 import type { Adjust, State, Channel } from './types';
 import { defaultAdjust, defaultCurves } from './types';
 
@@ -44,27 +45,121 @@ function fitCanvas(w: number, h: number, max: number) {
   return { w: Math.round(w * s), h: Math.round(h * s) };
 }
 
-async function loadImage(f: File) {
-  const bmp = await createImageBitmap(f);
-  const src = fitCanvas(bmp.width, bmp.height, MAX_SOURCE);
-  const prev = fitCanvas(bmp.width, bmp.height, MAX_PREVIEW);
+// Returns a 2D context backed by OffscreenCanvas when available, otherwise a
+// detached HTMLCanvasElement. Some Safari versions don't support OffscreenCanvas.
+function makeCanvas(w: number, h: number): {
+  ctx: CanvasRenderingContext2D | OffscreenCanvasRenderingContext2D;
+  toBlob: (type: string, quality?: number) => Promise<Blob>;
+} {
+  if (typeof OffscreenCanvas !== 'undefined') {
+    const c = new OffscreenCanvas(w, h);
+    const ctx = c.getContext('2d');
+    if (!ctx) throw new Error('No se pudo crear contexto 2D (OffscreenCanvas).');
+    return {
+      ctx,
+      toBlob: (type, quality) => c.convertToBlob({ type, quality }),
+    };
+  }
+  const c = document.createElement('canvas');
+  c.width = w; c.height = h;
+  const ctx = c.getContext('2d');
+  if (!ctx) throw new Error('No se pudo crear contexto 2D (canvas).');
+  return {
+    ctx,
+    toBlob: (type, quality) =>
+      new Promise<Blob>((resolve, reject) => {
+        c.toBlob(
+          (b) => (b ? resolve(b) : reject(new Error('Falló la conversión a blob.'))),
+          type,
+          quality,
+        );
+      }),
+  };
+}
 
-  const off1 = new OffscreenCanvas(src.w, src.h);
-  off1.getContext('2d')!.drawImage(bmp, 0, 0, src.w, src.h);
-  source = off1.getContext('2d')!.getImageData(0, 0, src.w, src.h);
+function isImageFile(f: File): boolean {
+  if (f.type && f.type.startsWith('image/')) return true;
+  return /\.(png|jpe?g|webp|gif|bmp|avif)$/i.test(f.name);
+}
 
-  const off2 = new OffscreenCanvas(prev.w, prev.h);
-  off2.getContext('2d')!.drawImage(bmp, 0, 0, prev.w, prev.h);
-  preview = off2.getContext('2d')!.getImageData(0, 0, prev.w, prev.h);
+async function bitmapFromFile(f: File): Promise<ImageBitmap | HTMLImageElement> {
+  if (typeof createImageBitmap === 'function') {
+    try {
+      return await createImageBitmap(f);
+    } catch {
+      // fall through to HTMLImageElement
+    }
+  }
+  const url = URL.createObjectURL(f);
+  try {
+    const img = await new Promise<HTMLImageElement>((resolve, reject) => {
+      const i = new Image();
+      i.onload = () => resolve(i);
+      i.onerror = () => reject(new Error('No se pudo decodificar la imagen.'));
+      i.src = url;
+    });
+    return img;
+  } finally {
+    setTimeout(() => URL.revokeObjectURL(url), 1000);
+  }
+}
+
+async function loadImage(f: File): Promise<void> {
+  if (!isImageFile(f)) {
+    toast(`Archivo no soportado: ${f.name}`, 'error');
+    return;
+  }
+
+  const bmp = await bitmapFromFile(f);
+  const w = 'naturalWidth' in bmp ? bmp.naturalWidth : bmp.width;
+  const h = 'naturalHeight' in bmp ? bmp.naturalHeight : bmp.height;
+  if (!w || !h) throw new Error('La imagen tiene dimensiones inválidas.');
+
+  const src = fitCanvas(w, h, MAX_SOURCE);
+  const prev = fitCanvas(w, h, MAX_PREVIEW);
+
+  const c1 = makeCanvas(src.w, src.h);
+  c1.ctx.drawImage(bmp as CanvasImageSource, 0, 0, src.w, src.h);
+  source = c1.ctx.getImageData(0, 0, src.w, src.h);
+
+  const c2 = makeCanvas(prev.w, prev.h);
+  c2.ctx.drawImage(bmp as CanvasImageSource, 0, 0, prev.w, prev.h);
+  preview = c2.ctx.getImageData(0, 0, prev.w, prev.h);
+
+  if ('close' in bmp && typeof bmp.close === 'function') bmp.close();
 
   sourceName = f.name.replace(/\.[^.]+$/, '') || 'image';
   drop.hidden = true;
   tools.hidden = false;
   schedule();
+  toast(`${f.name} cargada (${w}×${h})`, 'success');
 }
 
-file.addEventListener('change', () => { const f = file.files?.[0]; if (f) loadImage(f); });
-drop.addEventListener('click', () => file.click());
+async function handleFile(f: File | null | undefined): Promise<void> {
+  if (!f) return;
+  try {
+    await loadImage(f);
+  } catch (err) {
+    console.error('[loadImage]', err);
+    const msg = err instanceof Error ? err.message : 'Error desconocido al cargar la imagen.';
+    toast(msg, 'error');
+  }
+}
+
+file.addEventListener('change', () => {
+  const f = file.files?.[0];
+  // reset so the same file can be picked again
+  file.value = '';
+  void handleFile(f);
+});
+
+// Only fire programmatic file.click() when the user clicks the drop zone
+// itself (not the inner <label>, which already opens the picker natively).
+// Without this, the picker is opened twice and Chromium/Safari may cancel it.
+drop.addEventListener('click', (ev) => {
+  if (ev.target === drop) file.click();
+});
+
 ['dragenter', 'dragover'].forEach((e) =>
   drop.addEventListener(e, (ev) => { ev.preventDefault(); drop.classList.add('is-over'); }));
 ['dragleave', 'drop'].forEach((e) =>
@@ -72,7 +167,21 @@ drop.addEventListener('click', () => file.click());
 drop.addEventListener('drop', (ev) => {
   ev.preventDefault();
   const f = ev.dataTransfer?.files[0];
-  if (f) loadImage(f);
+  void handleFile(f);
+});
+
+// Prevent the browser from navigating away when files are dropped outside the zone
+['dragover', 'drop'].forEach((e) =>
+  window.addEventListener(e, (ev) => { ev.preventDefault(); }));
+
+// Surface unhandled async errors so they aren't silent
+window.addEventListener('unhandledrejection', (ev) => {
+  const reason = ev.reason;
+  const msg = reason instanceof Error ? reason.message : String(reason ?? 'Error inesperado');
+  toast(msg, 'error');
+});
+window.addEventListener('error', (ev) => {
+  toast(ev.message || 'Error inesperado', 'error');
 });
 
 // Tabs
@@ -132,31 +241,40 @@ q.addEventListener('input', () => { qv.textContent = q.value; });
 syncQuality();
 
 download.addEventListener('click', async () => {
-  if (!source) return;
+  if (!source) {
+    toast('No hay imagen cargada.', 'error');
+    return;
+  }
   download.disabled = true;
   try {
     const processed = apply(source, state);
     const s = Number(scale.value);
-    const out = new OffscreenCanvas(
-      Math.max(1, Math.round(processed.width * s)),
-      Math.max(1, Math.round(processed.height * s)),
+    const outW = Math.max(1, Math.round(processed.width * s));
+    const outH = Math.max(1, Math.round(processed.height * s));
+    const out = makeCanvas(outW, outH);
+
+    const tmp = makeCanvas(processed.width, processed.height);
+    tmp.ctx.putImageData(processed, 0, 0);
+    out.ctx.imageSmoothingQuality = 'high';
+    out.ctx.drawImage(
+      (tmp.ctx as CanvasRenderingContext2D).canvas as CanvasImageSource,
+      0, 0, outW, outH,
     );
-    const octx = out.getContext('2d')!;
-    // draw source imageData via intermediate canvas, then scale
-    const tmp = new OffscreenCanvas(processed.width, processed.height);
-    tmp.getContext('2d')!.putImageData(processed, 0, 0);
-    octx.imageSmoothingQuality = 'high';
-    octx.drawImage(tmp, 0, 0, out.width, out.height);
 
     const type = fmt.value === 'png' ? 'image/png' : 'image/jpeg';
     const quality = fmt.value === 'png' ? undefined : Number(q.value) / 100;
-    const blob = await out.convertToBlob({ type, quality });
+    const blob = await out.toBlob(type, quality);
     const url = URL.createObjectURL(blob);
     const a = document.createElement('a');
     a.href = url;
     a.download = `${sourceName}-edit.${fmt.value === 'png' ? 'png' : 'jpg'}`;
     a.click();
     setTimeout(() => URL.revokeObjectURL(url), 1000);
+    toast('Descarga lista.', 'success');
+  } catch (err) {
+    console.error('[download]', err);
+    const msg = err instanceof Error ? err.message : 'Error al exportar.';
+    toast(msg, 'error');
   } finally {
     download.disabled = false;
   }
