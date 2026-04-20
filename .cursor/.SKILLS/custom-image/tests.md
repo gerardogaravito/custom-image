@@ -20,6 +20,7 @@ src/curves.test.ts        # tests for buildLUT + isIdentity
 src/pipeline.test.ts      # tests for apply()
 src/heic.test.ts          # tests for isHeic()
 src/crop.test.ts          # tests for resizeBox / moveBox / fitToAspect / cropImageData
+src/undo.test.ts          # tests for UndoStack (LIFO, limit, regresion)
 ```
 
 Tests live next to the source they cover (Vitest convention). Excluded from the production tsc build via `tsconfig.json`'s `exclude`.
@@ -36,7 +37,7 @@ HTML coverage report opens at `coverage/index.html`.
 
 ## What's covered
 
-**Last run: 112 tests / 4 files passing** over the measured surface (`pipeline.ts`, `curves.ts`, `heic.ts`, `crop.ts`). Pure functions kept at ~100% lines.
+**Last run: 135 tests / 5 files passing** over the measured surface (`pipeline.ts`, `curves.ts`, `heic.ts`, `crop.ts`, `undo.ts`). Pure functions kept at ~100% lines.
 
 ### `curves.ts` — `isIdentity` and `buildLUT`
 
@@ -66,6 +67,26 @@ Organized into describes by feature for fast triage on failures.
 - Detection by MIME (`image/heic`, `image/heif`, `image/heic-sequence`, `image/heif-sequence`), case-insensitive.
 - Detection by extension when MIME is missing (`.heic`, `.heif`, case-insensitive).
 - Negatives: png/jpg/webp/gif/pdf/no-extension, plus tricky cases like `heic.png` and `contains-heic-in-name.jpg`.
+
+### `undo.ts` — `UndoStack<T>` and `History<T>`
+
+`UndoStack<T>`:
+- Empty contract: starts empty, `pop()` returns `undefined`, `isEmpty()` true.
+- LIFO order over multiple pushes.
+- `clear()` empties.
+- Limit: when over capacity, oldest entry is dropped (`shift`); default limit = 20; floors fractional limits; throws on `<=0`, `NaN`, `Infinity`.
+- **Regression** (slider undo bug): repeated `push → pop → push → pop` cycles return each item independently.
+- Generic over arbitrary payloads — preserves reference identity.
+
+`History<T>` (undo + redo coordinator):
+- Starts with no undo, no redo.
+- `push` enables undo and clears redo (a fresh action invalidates the redo chain).
+- `undo(current)` returns the past entry and stashes `current` into future.
+- `redo(current)` returns the future entry and stashes `current` into past.
+- `undo`/`redo` on empty return `undefined` and don't touch the other stack.
+- `clear` empties both.
+- **Round-trip test**: full undo → redo cycle preserves the chain.
+- **Regression** (crop scenario): snapshot before destructive op + undo restores both data AND `cropBox`. The exact pattern the user hit on the recortar tab.
 
 ### `crop.ts` — pure crop math
 

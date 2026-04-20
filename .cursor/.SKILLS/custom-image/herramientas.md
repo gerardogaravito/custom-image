@@ -64,6 +64,16 @@ Sin gimnasias. El `is-active` solo cambia colores (fondo `--accent`, texto `--bg
 
 El handler genérico lee `data-adj` para saber qué propiedad de `state.adjust` actualizar y `data-val` para encontrar el `<i>` que muestra el valor en vivo. Agregar un slider nuevo es solo HTML — el JS lo encuentra solo.
 
+### Doble click sobre el valor → reset al default
+
+El `<i data-val>` tiene `cursor: pointer` y un `:hover` que lo pinta con accent — son pistas visuales. Doble click resetea ese slider al valor de `defaultAdjust()[key]` (en general 0; `noiseSat` arranca en 50). Solo ese slider, no toca los demás.
+
+Implementado con un único listener delegado que itera los `<i data-val>` y mapea a su `data-adj` correspondiente.
+
+### Divider antes de los sliders de ruido
+
+`<hr class="sl-divider" />` separa visualmente saturación de los tres sliders de ruido (denoise / noise / noiseSat) porque conceptualmente son otra familia. Es solo CSS (border-top + margins), sin JS. Si agregás más grupos, replicar el patrón.
+
 **Las `data-adj` keys quedan en inglés** (`exposure`, `brightness`, etc.) porque son las propiedades del tipo `Adjust` en `types.ts` y del pipeline. Los **labels visibles** (`exposición`, `brillo`, ...) están en español. Si en algún momento se cambia un label en HTML, no toques el `data-adj`.
 
 Mapeo de rangos en `pipeline.ts`:
@@ -92,7 +102,7 @@ El estado se mantiene en `mountCurves` y se sincroniza con `state.curves` vía e
 
 Pipeline: master corre antes que per-channel (los LUTs per-channel ven valores ya corregidos por master). Test de regresión en `pipeline.test.ts > apply — curves > master curve runs before per-channel`.
 
-## Export (panel export)
+## Export (panel exportar)
 
 Genera el archivo final corriendo `apply()` sobre la imagen `source` (full-res, capada a 4096px), no sobre `preview` (capada a 1920px). Pasos:
 
@@ -101,19 +111,40 @@ Genera el archivo final corriendo `apply()` sobre la imagen `source` (full-res, 
 3. Crear el canvas final de salida con `naturalSize * scale` (escala 0.3x/1x/2x/4x).
 4. `drawImage` del intermedio al final con `imageSmoothingQuality: 'high'`.
 5. `convertToBlob` con `image/png` o `image/jpeg` + quality (solo JPG).
-6. Trigger descarga con `<a download>`.
+6. Trigger descarga con `<a download>` usando el nombre derivado por `nextDownloadName()`.
 
 Helper `makeCanvas(w, h)` decide entre `OffscreenCanvas` (preferido) y `HTMLCanvasElement` (fallback Safari).
 
-Toasts: muestra "Descarga lista." en éxito o el error específico si falla la conversión.
+### Naming del archivo descargado
 
-## Reset
+`{sourceName}_NN.{ext}` — primer download = `_01`, segundo = `_02`, etc., con padding de 2 dígitos. El sufijo lo lleva un `Map<string, number>` indexado por `sourceName`, persistente toda la sesión.
+
+**Limitación**: el navegador **no puede inspeccionar el filesystem del usuario** (sandbox). Si en el disco ya existe `Photo_01.png` de una sesión anterior, vamos a generar otro `Photo_01.png` y el navegador típicamente lo nombrará `Photo_01 (1).png` por su lógica de "Save As". No hay forma de evitarlo desde JS sin la File System Access API (Chromium-only + permisos), que sería overkill para este editor.
+
+El counter no se resetea al cargar una imagen nueva: si subís otra foto distinta, su `sourceName` no estará en el Map y arranca en `_01`. Si recargás la misma imagen en la misma sesión, continúa donde estaba.
+
+Toasts: "Descarga lista." en éxito, error específico si falla la conversión.
+
+## Reset (con undo)
 
 Botón `#reset` (esquina derecha del header). Restaura `defaultAdjust()` + `defaultCurves()` y refresca todos los inputs (sliders y widget de curvas). No afecta el zoom ni la imagen cargada.
+
+Pushea un snapshot al `undoStack` antes de aplicar y muestra un toast con un botón "undo" inline. Si el reset fue accidental, click en "undo" o `Cmd+Z` lo revierte. Ver `undo.md` para la mecánica completa.
+
+## Mostrar / ocultar herramientas
+
+El panel se cierra en cualquiera de estas formas:
+
+- Botón **"menu"** dentro de la barra de zoom (fixed, abajo al centro). Cambia a "ocultar" cuando el panel está visible. Toca en mobile (sin pretensión, fácil de alcanzar) y click en desktop.
+- `ESC` en desktop.
+
+`setToolsHidden(hidden: boolean)` es la única función que muta `tools.hidden`, así el label del botón se mantiene sincronizado siempre.
 
 ## Atajos relacionados
 
 - `ESC` → mostrar/ocultar herramientas (solo si hay imagen cargada).
+- `Cmd/Ctrl + Z` → undo (ver `undo.md`).
+- `Cmd/Ctrl + Shift + Z` → redo.
 
 Los demás atajos son del zoom (`zoom.md`).
 

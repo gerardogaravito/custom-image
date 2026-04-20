@@ -17,13 +17,20 @@ Deploy: independent Vercel project, custom domain `custom-image.garavito.dev` vi
 ## File map
 
 ```
-index.html          # shell: stage canvas, drop zone, floating tools panel with 3 tabs
+index.html          # shell: stage canvas, drop zone, floating tools panel
+public/favicon.png  # 64x64 PNG, served at /favicon.png by Vite
 src/style.css       # all styles, no preprocessor
 src/types.ts        # State, Adjust, Curves types + defaults
 src/curves.ts       # monotonic-cubic LUT builder + curve widget (mountCurves)
 src/pipeline.ts     # apply(src, state): ImageData → ImageData (pixel ops + blur + noise)
-src/main.ts         # upload, preview/export rAF loop, UI wiring
+src/crop.ts         # pure crop math (resize/move/fit + cropImageData)
+src/heic.ts         # HEIC detection + lazy heic2any conversion
+src/toast.ts        # toast utility (with optional inline action button)
+src/undo.ts         # generic LIFO UndoStack<T> (used by main.ts for snapshots)
+src/main.ts         # upload, preview/export rAF loop, UI wiring, undo, zoom
 ```
+
+Feature-specific docs live alongside this one: `zoom.md`, `recortar.md`, `rendering.md`, `herramientas.md`, `undo.md`, `tests.md`.
 
 ## Key design decisions
 

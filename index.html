@@ -4,6 +4,7 @@
     <meta charset="UTF-8" />
     <meta name="viewport" content="width=device-width, initial-scale=1.0" />
     <title>custom-image</title>
+    <link rel="icon" type="image/png" href="/favicon.png" />
     <link rel="stylesheet" href="/src/style.css" />
   </head>
   <body>
@@ -42,6 +43,7 @@
       <button id="zoom-in" title="acercar (+)" aria-label="acercar">+</button>
       <button id="zoom-fit" title="ajustar a pantalla (0)" aria-label="ajustar a pantalla">ajustar</button>
       <button id="zoom-100" title="tamaño real (1)" aria-label="tamaño real">1:1</button>
+      <button id="tools-toggle" title="mostrar u ocultar menú (esc)" aria-label="mostrar u ocultar menú">menu</button>
     </div>
 
     <section id="tools" class="tools" hidden>
@@ -75,6 +77,7 @@
         <label class="sl"><span>luces</span><input type="range" min="-100" max="100" value="0" data-adj="highlights"/><i data-val="highlights">0</i></label>
         <label class="sl"><span>negros</span><input type="range" min="-100" max="100" value="0" data-adj="blacks"/><i data-val="blacks">0</i></label>
         <label class="sl"><span>saturación</span><input type="range" min="-100" max="100" value="0" data-adj="saturation"/><i data-val="saturation">0</i></label>
+        <hr class="sl-divider" />
         <label class="sl"><span>reducir ruido</span><input type="range" min="0" max="100" value="0" data-adj="denoise"/><i data-val="denoise">0</i></label>
         <label class="sl"><span>añadir ruido</span><input type="range" min="0" max="100" value="0" data-adj="noise"/><i data-val="noise">0</i></label>
         <label class="sl"><span>sat. ruido</span><input type="range" min="0" max="100" value="50" data-adj="noiseSat"/><i data-val="noiseSat">50</i></label>

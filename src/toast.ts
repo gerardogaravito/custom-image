@@ -17,20 +17,42 @@ function ensureContainer(): HTMLDivElement {
 
 export type ToastHandle = () => void;
 
+export type ToastAction = {
+  label: string;
+  onClick: () => void;
+};
+
 export type ToastOptions = {
   kind?: ToastKind;
   /** Auto-dismiss after N ms. Use 0 (or any non-positive value) for a sticky toast. */
   durationMs?: number;
+  /** Optional inline action button (shown after the message text). */
+  action?: ToastAction;
 };
 
 export function toast(message: string, options: ToastOptions = {}): ToastHandle {
-  const { kind = 'info', durationMs = DEFAULT_DURATION_MS } = options;
+  const { kind = 'info', durationMs = DEFAULT_DURATION_MS, action } = options;
   const root = ensureContainer();
   const node = document.createElement('div');
   node.className = `toast toast--${kind}`;
-  node.textContent = message;
-  root.appendChild(node);
 
+  const text = document.createElement('span');
+  text.textContent = message;
+  node.appendChild(text);
+
+  if (action) {
+    const btn = document.createElement('button');
+    btn.className = 'toast__action';
+    btn.textContent = action.label;
+    btn.addEventListener('click', (e) => {
+      e.stopPropagation();
+      action.onClick();
+      dismiss();
+    });
+    node.appendChild(btn);
+  }
+
+  root.appendChild(node);
   requestAnimationFrame(() => node.classList.add('is-in'));
 
   let removed = false;
@@ -44,6 +66,7 @@ export function toast(message: string, options: ToastOptions = {}): ToastHandle 
 
   let timer = 0;
   if (durationMs > 0) timer = window.setTimeout(dismiss, durationMs);
+  // Click on the toast body (not the action button) dismisses it
   node.addEventListener('click', () => { window.clearTimeout(timer); dismiss(); });
 
   return dismiss;

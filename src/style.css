@@ -190,6 +190,18 @@ select {
   color: var(--fg);
   text-align: right;
   font-style: normal;
+  font-variant-numeric: tabular-nums;
+  cursor: pointer;
+  user-select: none;
+}
+.sl i:hover {
+  color: var(--accent);
+}
+
+.sl-divider {
+  border: none;
+  border-top: 1px solid var(--line);
+  margin: 4px 0 2px;
 }
 
 input[type='range'] {
@@ -392,6 +404,21 @@ select {
 }
 .toast--error {
   border-left-color: #ff3b30;
+}
+
+.toast__action {
+  background: transparent;
+  border: none;
+  color: var(--accent);
+  font: inherit;
+  font-size: inherit;
+  padding: 0 0 0 8px;
+  margin-left: 4px;
+  cursor: pointer;
+  text-decoration: underline;
+}
+.toast__action:hover {
+  color: var(--fg);
 }
 
 /* ----- crop overlay ----------------------------------------------------- */

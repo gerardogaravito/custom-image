@@ -65,6 +65,8 @@ export type CurvesUI = {
   active: Channel;
   onChange: () => void;
   reset: () => void;
+  /** Replace the widget's curves with a deep copy of the given snapshot and redraw. */
+  setState: (curves: Curves) => void;
 };
 
 /* v8 ignore start -- DOM/canvas widget, exercised in the browser */
@@ -195,6 +197,13 @@ export function mountCurves(canvas: HTMLCanvasElement, onChange: () => void): Cu
     reset() {
       const d = defaultCurves();
       (Object.keys(d) as Channel[]).forEach((k) => { state[k] = d[k]; });
+      draw();
+    },
+    setState(newCurves: Curves) {
+      (Object.keys(newCurves) as Channel[]).forEach((k) => {
+        // Deep copy points so further widget mutations don't affect the snapshot
+        state[k] = newCurves[k].map((p) => ({ x: p.x, y: p.y }));
+      });
       draw();
     },
   } as unknown as CurvesUI;

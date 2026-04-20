@@ -13,7 +13,8 @@ import {
   parseAspect,
   resizeBox,
 } from './crop';
-import type { Adjust, State, Channel } from './types';
+import { History } from './undo';
+import type { Adjust, Curves, State, Channel } from './types';
 import { defaultAdjust, defaultCurves } from './types';
 
 const MAX_PREVIEW = 1920;
@@ -35,6 +36,7 @@ const drop = $<HTMLDivElement>('#drop');
 const tools = $<HTMLElement>('#tools');
 const zoomBar = $<HTMLDivElement>('#zoom');
 const zoomLevel = $<HTMLElement>('#zoom-level');
+const toolsToggle = $<HTMLButtonElement>('#tools-toggle');
 const curveCanvas = $<HTMLCanvasElement>('#curve');
 const reset = $<HTMLButtonElement>('#reset');
 
@@ -56,6 +58,10 @@ let sourceName = 'image';
 let isInteracting = false;
 let interactionEndTimer = 0;
 function flagInteraction() {
+  // Snapshot once at the START of each interaction burst (slider drag, curve
+  // edit, dblclick reset). Within a burst (continuous input), no extra
+  // snapshots — otherwise a single drag would push hundreds.
+  if (!isInteracting) pushUndo();
   isInteracting = true;
   schedule();
   clearTimeout(interactionEndTimer);
@@ -218,8 +224,10 @@ async function loadImage(f: File): Promise<void> {
 
   sourceName = f.name.replace(/\.[^.]+$/, '') || 'image';
   drop.hidden = true;
-  tools.hidden = false;
+  setToolsHidden(false);
   zoomBar.hidden = false;
+  // Reset history on a fresh image so we don't restore stale buffers
+  history.clear();
   // Reset to fit-to-screen on every new image so the user always starts seeing
   // the whole photo regardless of the previous zoom state.
   setZoom('fit');
@@ -442,10 +450,19 @@ function isTypingInField(target: EventTarget | null): boolean {
 
 window.addEventListener('keydown', (e) => {
   if (e.key === 'Escape') {
-    // Only meaningful once an image is loaded (otherwise tools is hidden anyway).
     if (!preview) return;
-    tools.hidden = !tools.hidden;
+    setToolsHidden(!tools.hidden);
     e.preventDefault();
+    return;
+  }
+
+  // Cmd/Ctrl + Z → undo, Cmd/Ctrl + Shift + Z → redo. Allowed even from inputs
+  // because sliders don't have their own undo, and text inputs are rare here.
+  if ((e.metaKey || e.ctrlKey) && (e.key === 'z' || e.key === 'Z')) {
+    if (!preview) return;
+    e.preventDefault();
+    if (e.shiftKey) redo();
+    else undo();
     return;
   }
 
@@ -498,6 +515,23 @@ $$('.chan__btn').forEach((btn) => {
 });
 
 // Sliders
+function setSliderValue(key: keyof Adjust, value: number) {
+  state.adjust[key] = value;
+  const inp = $<HTMLInputElement>(`input[data-adj="${key}"]`);
+  if (inp) inp.value = String(value);
+  const val = $<HTMLElement>(`[data-val="${key}"]`);
+  if (val) val.textContent = String(value);
+}
+
+function syncSliderInputs() {
+  $$<HTMLInputElement>('input[data-adj]').forEach((inp) => {
+    const key = inp.dataset.adj as keyof Adjust;
+    inp.value = String(state.adjust[key]);
+    const val = $<HTMLElement>(`[data-val="${key}"]`);
+    if (val) val.textContent = inp.value;
+  });
+}
+
 $$<HTMLInputElement>('input[data-adj]').forEach((inp) => {
   const key = inp.dataset.adj as keyof Adjust;
   const val = $<HTMLElement>(`[data-val="${key}"]`);
@@ -508,18 +542,29 @@ $$<HTMLInputElement>('input[data-adj]').forEach((inp) => {
   });
 });
 
-// Reset
+// Double-click on the value indicator → reset that slider to its default.
+$$<HTMLElement>('i[data-val]').forEach((el) => {
+  el.addEventListener('dblclick', () => {
+    const key = el.dataset.val as keyof Adjust;
+    const def = defaultAdjust()[key];
+    if (state.adjust[key] === def) return;
+    setSliderValue(key, def);
+    flagInteraction();
+  });
+});
+
+// Reset (uses the undo system below)
 reset.addEventListener('click', () => {
+  pushUndo();
   state.adjust = defaultAdjust();
   curves.reset();
   state.curves = curves.state;
-  $$<HTMLInputElement>('input[data-adj]').forEach((inp) => {
-    const key = inp.dataset.adj as keyof Adjust;
-    inp.value = String(state.adjust[key]);
-    const val = $<HTMLElement>(`[data-val="${key}"]`);
-    if (val) val.textContent = inp.value;
-  });
+  syncSliderInputs();
   schedule();
+  toast('ajustes restaurados', {
+    kind: 'info',
+    action: { label: 'undo', onClick: undo },
+  });
 });
 
 // Export
@@ -529,6 +574,17 @@ const q = $<HTMLInputElement>('#q');
 const qv = $<HTMLElement>('#qv');
 const qwrap = $<HTMLElement>('#qwrap');
 const download = $<HTMLButtonElement>('#download');
+
+// Session-wide counter per source name. Browsers can't inspect the user's
+// filesystem (sandbox), so we can't know if `Photo_01.png` already exists on
+// disk — but we can give each download a unique 2-digit suffix within the
+// current session. First download = _01, second = _02, ... up to _99.
+const downloadCounters = new Map<string, number>();
+function nextDownloadName(base: string, ext: string): string {
+  const next = (downloadCounters.get(base) ?? 0) + 1;
+  downloadCounters.set(base, next);
+  return `${base}_${String(next).padStart(2, '0')}.${ext}`;
+}
 
 function syncQuality() { qwrap.hidden = fmt.value === 'png'; }
 fmt.addEventListener('change', syncQuality);
@@ -562,7 +618,7 @@ download.addEventListener('click', async () => {
     const url = URL.createObjectURL(blob);
     const a = document.createElement('a');
     a.href = url;
-    a.download = `${sourceName}-edit.${fmt.value === 'png' ? 'png' : 'jpg'}`;
+    a.download = nextDownloadName(sourceName, fmt.value === 'png' ? 'png' : 'jpg');
     a.click();
     setTimeout(() => URL.revokeObjectURL(url), 1000);
     toast('Descarga lista.', { kind: 'success' });
@@ -706,23 +762,39 @@ window.addEventListener('pointermove', (e) => {
 window.addEventListener('pointerup', () => { drag = null; });
 
 // Aspect ratio selector
+function recomputeCropAspect() {
+  if (cropAspectKey === 'free') {
+    cropAspect = null;
+    return;
+  }
+  if (cropAspectKey === 'original' && preview) {
+    cropAspect = preview.width / preview.height;
+    return;
+  }
+  let a = parseAspect(cropAspectKey);
+  if (a === null) { cropAspect = null; return; }
+  // The buttons store the portrait ratio (W:H with W < H). Flip on landscape.
+  if (cropOrient === 'landscape' && a < 1) a = 1 / a;
+  if (cropOrient === 'portrait' && a > 1) a = 1 / a;
+  cropAspect = a;
+}
+
+function syncCropAspectButtons() {
+  $$('.aspect-btn').forEach((b) => {
+    b.classList.toggle('is-active', (b as HTMLElement).dataset.aspect === cropAspectKey);
+  });
+}
+
+function syncCropOrientButtons() {
+  $$('.crop-orient__btn').forEach((b) => {
+    b.classList.toggle('is-active', (b as HTMLElement).dataset.orient === cropOrient);
+  });
+}
+
 function setAspect(key: string) {
   cropAspectKey = key;
-  if (key === 'free') {
-    cropAspect = null;
-  } else if (key === 'original' && preview) {
-    cropAspect = preview.width / preview.height;
-  } else {
-    let a = parseAspect(key);
-    if (a === null) return;
-    // The buttons store the portrait ratio (W:H with W < H). Flip on landscape.
-    if (cropOrient === 'landscape' && a < 1) a = 1 / a;
-    if (cropOrient === 'portrait' && a > 1) a = 1 / a;
-    cropAspect = a;
-  }
-  $$('.aspect-btn').forEach((b) => {
-    b.classList.toggle('is-active', (b as HTMLElement).dataset.aspect === key);
-  });
+  recomputeCropAspect();
+  syncCropAspectButtons();
   if (cropBox && preview && cropAspect !== null) {
     cropBox = fitToAspect(cropBox, cropAspect, { w: preview.width, h: preview.height });
     syncOverlay();
@@ -735,9 +807,8 @@ $$('.aspect-btn').forEach((btn) => {
 
 $$('.crop-orient__btn').forEach((btn) => {
   btn.addEventListener('click', () => {
-    const o = (btn as HTMLElement).dataset.orient as 'portrait' | 'landscape';
-    cropOrient = o;
-    $$('.crop-orient__btn').forEach((b) => b.classList.toggle('is-active', b === btn));
+    cropOrient = (btn as HTMLElement).dataset.orient as 'portrait' | 'landscape';
+    syncCropOrientButtons();
     setAspect(cropAspectKey);
   });
 });
@@ -756,17 +827,24 @@ $<HTMLButtonElement>('#crop-apply').addEventListener('click', () => {
   };
   preview = cropImageData(preview, cropBox);
   source = cropImageData(source, sourceBoxPx);
-  cropBox = null;
+  // Stay in crop mode and reset the box to the new full bounds. The pre-apply
+  // snapshot (pushed by the capture-phase listener below) keeps the previous
+  // box, so undo restores both source/preview AND the user's last selection.
+  cropBox = fullBox({ w: preview.width, h: preview.height });
   rebuildInteractivePreview();
-  exitCropMode();
+  if (cropActive) syncOverlay();
   setZoom('fit');
   schedule();
   requestAnimationFrame(() => updateZoomLabel());
-  toast('Recorte aplicado.', { kind: 'success' });
+  toast('recorte aplicado', {
+    kind: 'success',
+    action: { label: 'undo', onClick: undo },
+  });
 });
 
 $<HTMLButtonElement>('#crop-reset').addEventListener('click', () => {
   if (!originalSource || !originalPreview) return;
+  pushUndo();
   source = originalSource;
   preview = originalPreview;
   rebuildInteractivePreview();
@@ -777,5 +855,115 @@ $<HTMLButtonElement>('#crop-reset').addEventListener('click', () => {
     updateZoomLabel();
     if (cropActive) syncOverlay();
   });
-  toast('Imagen restaurada al original.', { kind: 'success' });
+  toast('imagen restaurada al original', {
+    kind: 'success',
+    action: { label: 'undo', onClick: undo },
+  });
 });
+
+// ----------------------------------------------------------------------------
+// Undo / redo
+// ----------------------------------------------------------------------------
+
+type Snapshot = {
+  adjust: Adjust;
+  curves: Curves;
+  source: ImageData;
+  preview: ImageData;
+  interactivePreview: ImageData | null;
+  // Crop state must be in the snapshot too — otherwise undoing a "aplicar"
+  // restored source/preview but lost the user's selection box.
+  cropBox: CropBox | null;
+  cropAspectKey: string;
+  cropOrient: 'portrait' | 'landscape';
+};
+
+const history = new History<Snapshot>(20);
+
+function deepCopyCurves(c: Curves): Curves {
+  return {
+    m: c.m.map((p) => ({ x: p.x, y: p.y })),
+    r: c.r.map((p) => ({ x: p.x, y: p.y })),
+    g: c.g.map((p) => ({ x: p.x, y: p.y })),
+    b: c.b.map((p) => ({ x: p.x, y: p.y })),
+  };
+}
+
+function makeSnapshot(): Snapshot {
+  return {
+    adjust: { ...state.adjust },
+    curves: deepCopyCurves(state.curves),
+    source: source!,
+    preview: preview!,
+    interactivePreview,
+    cropBox: cropBox ? { ...cropBox } : null,
+    cropAspectKey,
+    cropOrient,
+  };
+}
+
+function applySnapshot(snap: Snapshot) {
+  state.adjust = { ...snap.adjust };
+  curves.setState(snap.curves);
+  state.curves = curves.state;
+  source = snap.source;
+  preview = snap.preview;
+  interactivePreview = snap.interactivePreview;
+  cropBox = snap.cropBox ? { ...snap.cropBox } : null;
+  cropAspectKey = snap.cropAspectKey;
+  cropOrient = snap.cropOrient;
+  recomputeCropAspect();
+  syncCropAspectButtons();
+  syncCropOrientButtons();
+  syncSliderInputs();
+  schedule();
+  // If the user is currently on the crop tab, redraw the overlay with the
+  // restored box. (cropActive itself is not snapshotted — we don't force-switch
+  // tabs on undo.)
+  if (cropActive && preview) syncOverlay();
+}
+
+function pushUndo() {
+  if (!source || !preview) return;
+  history.push(makeSnapshot());
+}
+
+function undo() {
+  if (!history.canUndo()) {
+    toast('nada que deshacer', { kind: 'info', durationMs: 1500 });
+    return;
+  }
+  const snap = history.undo(makeSnapshot())!;
+  applySnapshot(snap);
+}
+
+function redo() {
+  if (!history.canRedo()) {
+    toast('nada que rehacer', { kind: 'info', durationMs: 1500 });
+    return;
+  }
+  const snap = history.redo(makeSnapshot())!;
+  applySnapshot(snap);
+}
+
+// Push a snapshot before applying a crop — so an accidental "aplicar" can be
+// undone the same way. Uses the capture phase to run BEFORE the existing
+// inline listener that mutates source/preview.
+$<HTMLButtonElement>('#crop-apply').addEventListener('click', () => {
+  if (preview && cropBox) pushUndo();
+}, { capture: true });
+
+// ----------------------------------------------------------------------------
+// Tools toggle (mobile + desktop)
+// ----------------------------------------------------------------------------
+
+function syncToolsToggleLabel() {
+  toolsToggle.textContent = tools.hidden ? 'menu' : 'ocultar';
+}
+
+function setToolsHidden(hidden: boolean) {
+  tools.hidden = hidden;
+  syncToolsToggleLabel();
+}
+
+toolsToggle.addEventListener('click', () => setToolsHidden(!tools.hidden));
