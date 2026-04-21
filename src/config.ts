@@ -16,15 +16,24 @@ export const HINTS = {
 };
 
 /**
- * Mobile UX tunables. Single tap on the canvas (touch only) toggles immersion
- * mode — the chrome (tools, zoom bar, hints) fades out so the photo is
- * unobstructed. After `immersionDurationSeconds` the chrome fades back.
+ * Mobile UX tunables. The mobile UI follows an "image-first" model:
+ *   • Default state after image load is `body.is-menu-hidden` — only the
+ *     image + zoom bar are visible.
+ *   • Single tap on the canvas toggles the menu (tabs bar + bottom sheet).
+ *   • Drag or pinch on the canvas auto-hides the menu so it gets out of the
+ *     way during exploration / zoom gestures.
+ * See mobile-ux.md § 7 for the full state machine.
  */
 export const MOBILE_UX = {
-  /** Seconds chrome stays faded after a tap-to-immerse before auto-restoring. */
-  immersionDurationSeconds: 3,
   /** Max time (ms) between pointerdown and pointerup to count as a tap. */
   tapMaxMs: 250,
   /** Max movement (px) during a tap — anything more is treated as a drag. */
   tapMaxPx: 8,
+  /**
+   * Pointer travel (px) on the canvas that triggers the auto-hide of the
+   * mobile menu. Higher than `tapMaxPx` so a slightly shaky tap doesn't
+   * accidentally hide it; lower than a typical pan gesture so the menu is
+   * already out of the way once the user is exploring.
+   */
+  dragHidePx: 30,
 };

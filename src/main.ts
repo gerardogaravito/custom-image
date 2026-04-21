@@ -256,7 +256,10 @@ async function loadImage(f: File): Promise<void> {
 
   sourceName = f.name.replace(/\.[^.]+$/, '') || 'image';
   drop.hidden = true;
-  setToolsHidden(false);
+  // Mobile boots image-first: hide the editing chrome so the photo gets the
+  // whole screen on first load. User taps the canvas (or the "menu" button
+  // in the zoom bar) to bring up the tabs + bottom sheet.
+  setToolsHidden(isMobileLayout());
   maybeShowEscHint();
   zoomBar.hidden = false;
   // Reset history on a fresh image so we don't restore stale buffers
@@ -424,6 +427,9 @@ view.addEventListener('pointerdown', (e) => {
   if (countTouchPointers(activePointers.values()) >= 2) {
     multiTouchInGesture = true;
     tapCandidate = null;
+    // Pinch = "I'm zooming, get the chrome out of my way". Auto-hide so the
+    // bottom sheet doesn't eat the bottom half of the photo while scaling.
+    hideMobileMenuOnGesture();
     if (pan) {
       pan = null;
       view.classList.remove('is-panning');
@@ -483,7 +489,13 @@ window.addEventListener('pointermove', (e) => {
   if (tapCandidate && tapCandidate.pointerId === e.pointerId) {
     const dx = e.clientX - tapCandidate.x;
     const dy = e.clientY - tapCandidate.y;
-    if (Math.hypot(dx, dy) > MOBILE_UX.tapMaxPx) tapCandidate = null;
+    const dist = Math.hypot(dx, dy);
+    if (dist > MOBILE_UX.tapMaxPx) tapCandidate = null;
+    // Drag-to-hide (mobile only): once the touch travels beyond a clear-intent
+    // threshold (well past the tap fuzz), hide the menu so the user can pan
+    // without the bottom sheet covering half the photo. Threshold is meant to
+    // be conservative — a slightly shaky tap shouldn't trigger this.
+    if (dist > MOBILE_UX.dragHidePx) hideMobileMenuOnGesture();
   }
 
   if (pinch && countTouchPointers(activePointers.values()) >= 2) {
@@ -525,14 +537,18 @@ window.addEventListener('pointerup', (e) => {
 
   // Tap completion: same pointer, no movement, short duration, no multi-touch
   // happened during the gesture, and pointer was touch/pen (not mouse).
+  // Mobile-only: tap toggles the menu visibility (Phase 3 image-first model).
+  // Desktop ignores it — there's no overlap problem and this would conflict
+  // with normal click handlers.
   if (
     wasTracked
     && tapCandidate
     && tapCandidate.pointerId === e.pointerId
     && !multiTouchInGesture
     && Date.now() - tapCandidate.t < MOBILE_UX.tapMaxMs
+    && isMobileLayout()
   ) {
-    toggleImmersed();
+    toggleMobileMenu();
   }
   tapCandidate = null;
 
@@ -568,20 +584,23 @@ window.addEventListener('pointercancel', (e) => {
   if (activePointers.size === 0) multiTouchInGesture = false;
 });
 
-// --- tap-to-immerse: hide all chrome temporarily so the user sees the photo ---
-let immersed = false;
-let immersionTimer = 0;
+// --- mobile menu visibility (Phase 3: image-first model) -------------------
+// On mobile the editor boots with the menu hidden so the photo fills the
+// screen. Tap-to-toggle, drag-to-hide and pinch-to-hide all flip the
+// `body.is-menu-hidden` class. Desktop has no equivalent — there the
+// `tools.hidden` attribute drives the same intent.
 
-function toggleImmersed() {
-  immersed = !immersed;
-  document.body.classList.toggle('is-immersed', immersed);
-  clearTimeout(immersionTimer);
-  if (immersed) {
-    immersionTimer = window.setTimeout(() => {
-      immersed = false;
-      document.body.classList.remove('is-immersed');
-    }, MOBILE_UX.immersionDurationSeconds * 1000);
-  }
+function toggleMobileMenu() {
+  setToolsHidden(!isMenuHidden());
+}
+
+/** Hide the mobile menu if it's currently visible (no-op on desktop or when
+ *  already hidden). Called from gesture handlers (drag, pinch) so the chrome
+ *  gets out of the way the moment the user starts exploring the photo. */
+function hideMobileMenuOnGesture() {
+  if (!isMobileLayout()) return;
+  if (isMenuHidden()) return;
+  setToolsHidden(true);
 }
 
 $<HTMLButtonElement>('#zoom-in').addEventListener('click', () => zoomBy(ZOOM_STEP));
@@ -687,7 +706,7 @@ function isTypingInField(target: EventTarget | null): boolean {
 window.addEventListener('keydown', (e) => {
   if (e.key === 'Escape') {
     if (!preview) return;
-    setToolsHidden(!tools.hidden);
+    setToolsHidden(!isMenuHidden());
     e.preventDefault();
     return;
   }
@@ -1319,8 +1338,17 @@ $<HTMLButtonElement>('#crop-apply').addEventListener('click', () => {
 // Tools toggle (mobile + desktop)
 // ----------------------------------------------------------------------------
 
+/** Whether the editing chrome (tabs bar + bottom sheet on mobile, the whole
+ *  panel on desktop) is currently hidden. The hidden state is encoded
+ *  differently per layout: mobile uses a body class so the panels stay in the
+ *  DOM and fade with a transition; desktop uses the `hidden` attribute. */
+function isMenuHidden(): boolean {
+  if (isMobileLayout()) return document.body.classList.contains('is-menu-hidden');
+  return tools.hidden;
+}
+
 function syncToolsToggleLabel() {
-  toolsToggle.textContent = tools.hidden ? 'menu' : 'ocultar';
+  toolsToggle.textContent = isMenuHidden() ? 'menu' : 'ocultar';
 }
 
 // First-time discoverability hint for the ESC shortcut. Only on desktop
@@ -1335,7 +1363,15 @@ function maybeShowEscHint() {
 }
 
 function setToolsHidden(hidden: boolean) {
-  tools.hidden = hidden;
+  // Mobile: body class drives a CSS opacity+transform fade; the panel stays
+  // in the DOM so the next tap can re-show it without a re-render. Desktop:
+  // the `hidden` attribute removes it from the layout entirely (the corner
+  // panel doesn't need to animate).
+  if (isMobileLayout()) {
+    document.body.classList.toggle('is-menu-hidden', hidden);
+  } else {
+    tools.hidden = hidden;
+  }
   // The crop overlay floats on top of the canvas — without the panel that
   // controls it, it has no business being there. Hide it with the panel and
   // restore it when the panel comes back (only if the user was in crop mode).
@@ -1349,7 +1385,7 @@ function setToolsHidden(hidden: boolean) {
   syncToolsToggleLabel();
 }
 
-toolsToggle.addEventListener('click', () => setToolsHidden(!tools.hidden));
+toolsToggle.addEventListener('click', () => setToolsHidden(!isMenuHidden()));
 
 // ----------------------------------------------------------------------------
 // Session persistence (IndexedDB)
@@ -1443,7 +1479,8 @@ async function restoreSession(saved: Session): Promise<void> {
 
   sourceName = saved.sourceName;
   drop.hidden = true;
-  setToolsHidden(false);
+  // Same image-first default as fresh loads — see loadImage().
+  setToolsHidden(isMobileLayout());
   zoomBar.hidden = false;
   setZoom('fit');
   schedule();

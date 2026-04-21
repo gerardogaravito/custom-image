@@ -4,13 +4,18 @@ Cómo está armada la experiencia táctil del editor. Pensado para iPhone Safari
 
 ## El problema que resolvemos
 
-El modal de herramientas (320px de ancho fijo, top-right) en mobile cubre ~50% de la pantalla. La foto que estás editando queda mayormente oculta. Tres soluciones complementarias, ninguna requiere reestructurar el layout — todas son opacity + gestos:
+El modal de herramientas (320px fixed, top-right) en mobile cubría ~50% de la pantalla. Foto mayormente oculta. La solución actual es un modelo **image-first**: el editor bootea con el menú oculto y la foto a pantalla completa, igual que Lightroom Mobile / Apple Photos. El menú aparece on-demand vía tap, y se auto-oculta apenas el usuario hace gestos sobre la foto (drag o pinch).
 
-1. **Tap-to-immerse** — un toque en la foto y todo el chrome se desvanece para verla limpia.
-2. **Auto-fade al editar** — mientras arrastrás un slider, el panel baja a 50% para ver el cambio en vivo detrás.
-3. **Pinch + two-finger pan** — gestos nativos para zoom y pan, los que ya tenés en músculo desde Photos.
+Componentes de la experiencia táctil actual:
 
-## 1. Tap-to-immerse
+1. **Modelo image-first (§ 7)** — menú oculto por default, tap-to-toggle, drag/pinch auto-hide. Reemplaza al tap-to-immerse temporal de Phase 1 (§ 1, ahora obsoleto) y al panel-al-fondo de Phase 2 (§ 4, ahora obsoleto).
+2. **Auto-fade al editar (§ 2)** — mientras arrastrás un slider, el bottom sheet baja a 50% para ver el cambio detrás.
+3. **Pinch + two-finger pan (§ 3)** — gestos nativos para zoom y pan, en músculo desde Photos.
+4. **Suppression del pinch nativo de iOS (§ 6)** — sin esto, iOS dispara su pinch de página por encima del nuestro.
+
+## 1. Tap-to-immerse — OBSOLETO (reemplazado por § 7)
+
+> Phase 1 implementaba un toggle temporal de `body.is-immersed` que ocultaba todo el chrome 3 s y se restauraba solo. Phase 3 reemplazó esto por un toggle persistente de `body.is-menu-hidden` con default-hidden en mobile (ver § 7). El comentario sobre tap vs drag y el flag `multiTouchInGesture` siguen siendo relevantes — el tap callback ahora dispara `toggleMobileMenu()` en lugar de `toggleImmersed()`. Se conserva esta sección por contexto histórico.
 
 Toque (touch o pen, NO mouse) en el canvas. Sin movimiento. Corto. Toggle de `body.is-immersed`. CSS:
 
@@ -115,13 +120,17 @@ El primer `pointerdown` registra `tapCandidate` solo si NO había nadie más. Si
 
 ```ts
 export const MOBILE_UX = {
-  immersionDurationSeconds: 3,  // duración del tap-to-immerse
-  tapMaxMs: 250,                // tiempo máx pointerdown→pointerup para tap
-  tapMaxPx: 8,                  // movimiento máx durante un tap
+  tapMaxMs: 250,    // tiempo máx pointerdown→pointerup para tap
+  tapMaxPx: 8,      // movimiento máx durante un tap
+  dragHidePx: 30,   // movimiento que dispara auto-hide del menú (§ 7)
 };
 ```
 
-## 4. Phase 2 — panel al fondo en mobile (punto E)
+Notar que `immersionDurationSeconds` se removió en Phase 3 — el menú ya no se restaura solo, queda oculto hasta que el usuario lo invoque con tap (o ESC en desktop).
+
+## 4. Phase 2 — panel al fondo en mobile (punto E) — OBSOLETO (reemplazado por § 7)
+
+> Phase 2 movió `#tools` entero al fondo como un panel scrolleable de 60vh. Phase 3 lo desarmó: ahora `.tools__bar` (tabs + reset) vive arriba pegado al zoom bar y el panel activo (`.panel`) vive abajo como bottom sheet de 50vh. Todo el resto de Phase 2 sigue en pie (zoom arriba, ab-hint hidden, safe-area, sticky tabs en su nueva posición). Se conserva esta sección por contexto histórico.
 
 CSS-only para reubicar `#tools` y compañía en touch devices. Cero cambios en el área de gestos.
 
@@ -214,9 +223,9 @@ También se removió el outer `if (activePointers.size === 1)` del pointerdown (
 ### Lo que NO se rompió
 
 Casos a verificar después de tocar el área:
-- Mobile single tap → `toggleImmersed`
-- Mobile pinch (2 dedos) → `countTouchPointers === 2` → entra a pinch
-- Mobile single-finger pan (con overflow) → pan
+- Mobile single tap → `toggleMobileMenu()` (Phase 3, antes era `toggleImmersed`)
+- Mobile pinch (2 dedos) → `countTouchPointers === 2` → entra a pinch + auto-hide del menú (§ 7)
+- Mobile single-finger pan (con overflow) → pan + auto-hide del menú al cruzar `dragHidePx` (§ 7)
 - Desktop click sin overflow → ni pan, ni pinch, ni tap (correcto, no debe pasar nada)
 - Desktop click+drag con overflow → pan funciona
 - Desktop click+drag con orphan pointer → no más phantom pinch (fix)
@@ -268,11 +277,104 @@ Probamos. iOS lo ignora. Cualquier app web que necesite suprimir pinch en iOS DE
 - **Chrome/Firefox/otros**: no disparan gesture events. Los listeners son no-ops, sin overhead.
 - **Desktop**: `touch-action` afecta solo input táctil. Mouse + trackpad scroll wheel siguen funcionando exactamente igual.
 
+## 7. Phase 3 — modelo image-first
+
+Reemplaza Phase 1 (tap-to-immerse temporal) y Phase 2 (panel al fondo). El editor mobile bootea con la foto a pantalla completa y el menú oculto. La intención: en mobile el espacio es escaso, la foto es el contenido, todo lo demás es chrome on-demand.
+
+### Estado y máquina
+
+Una sola fuente de verdad: `body.is-menu-hidden`.
+
+```text
+                          ┌──────────────────┐
+                          │  loadImage() →   │
+                          │  setToolsHidden  │
+                          │   (isMobile)     │
+                          └────────┬─────────┘
+                                   ▼
+       ┌─────────────────┐    tap canvas    ┌─────────────────┐
+       │   menu HIDDEN   │ ◄──────────────► │  menu VISIBLE   │
+       │ (default mobile)│                   │  (tabs + sheet) │
+       └─────────────────┘                   └─────────────────┘
+            ▲    ▲                                ▲    │
+            │    │                                │    │ drag > 30 px
+            │    │                                │    │ pinch (≥ 2 touches)
+            │    │                                │    │
+            │    └── tap "menu" / ESC ────────────┘    │
+            └────────────────────────────────────────── ┘
+```
+
+Transitions:
+- **Tap en canvas** (mobile): toggle. Funciona en ambas direcciones.
+- **Drag > `MOBILE_UX.dragHidePx`** (default 30 px) en canvas: hide. Threshold > `tapMaxPx` (8 px) para que un tap shaky no oculte sin querer.
+- **Pinch (≥ 2 touch pointers)**: hide al entrar al modo pinch. "Estás zoomeando, fuera del medio".
+- **Botón "menu" o ESC**: toggle. Único camino para mostrar el menú durante crop mode (donde los gestos de canvas están bloqueados).
+
+Crop mode bloquea todos los gestos sobre el canvas (`if (cropActive) return` en `pointerdown`), así que tap/drag/pinch no esconden el menú durante un recorte. El usuario sigue teniendo el botón "ocultar"/"menu" como escape.
+
+### Layout CSS
+
+`.tools` se vuelve un contenedor lógico sin presencia visual en mobile (`background: transparent`, `border: none`, `position: static`). Sus dos hijos se posicionan independientemente con `position: fixed`:
+
+- **`.tools__bar`** (tabs + reset): top, justo debajo del zoom bar (`top: calc(safe-area-top + 44px)`), full-width, slim translúcido.
+- **`.panel`** (la pestaña activa): bottom, full-width, `max-height: 50vh`, `overflow-y: auto`. Las pestañas inactivas siguen con `hidden` attribute → `display: none`, así sólo una vive en pantalla.
+- **`.zoom`**: queda en el top como en Phase 2, **siempre visible** incluso con menú oculto. Es feedback constante del estado y entry-point al menú vía botón "menu".
+
+Estado `is-menu-hidden`: `opacity: 0; pointer-events: none; transform: translateY(±8px)` en `.tools__bar` y `.panel`. La transición es 200 ms. Pointer-events: none deja que los toques pasen al canvas debajo.
+
+### Por qué la opacidad fade y no display: none
+
+Tres razones:
+1. **Animación** — `display: none` no transiciona, el menú aparecería/desaparecería abrupto.
+2. **Continuidad** — los listeners de los sliders / inputs siguen vivos, no hay teardown ni re-mount.
+3. **Pointer-events: none** asegura que el menú "fantasma" no roba toques cuando está oculto.
+
+Trade-off: el DOM siempre está renderizado. En mobile esto cuesta poco (~100 elementos de slider, todos optimizados por el browser). Si fuera un performance issue, conmutar a un componente lazy-mounted; hoy no es problema.
+
+### Por qué auto-hide en drag/pinch en lugar de quedarse ahí
+
+UX heurística estándar de editores foto-mobile (Lightroom, VSCO, Snapseed): cuando el usuario gestiona la imagen (zoomear, mover), el chrome estorba. Acción del usuario en la foto = "déjame ver la foto sin distracción". Threshold conservador (`dragHidePx: 30`, ~3 mm en una pantalla de iPhone) para que sólo se dispare en intención clara.
+
+### Por qué el threshold de drag es > tapMaxPx pero no demasiado
+
+- `tapMaxPx = 8`: zone de tolerancia para que un tap con dedo shaky cuente igual.
+- `dragHidePx = 30`: ya es claro que el usuario está moviendo, no tapeando.
+
+Si fuera igual a `tapMaxPx` (8), un tap apenas-shaky ocultaría el menú, frustrante. Si fuera demasiado alto (e.g. 100), el menú quedaría visible durante una parte considerable del drag, tapando el preview.
+
+### `setToolsHidden(hidden)` despacha por layout
+
+```ts
+function setToolsHidden(hidden: boolean) {
+  if (isMobileLayout()) {
+    document.body.classList.toggle('is-menu-hidden', hidden);
+  } else {
+    tools.hidden = hidden;
+  }
+  // crop overlay + ab-hint + label sync
+}
+
+function isMenuHidden(): boolean {
+  if (isMobileLayout()) return document.body.classList.contains('is-menu-hidden');
+  return tools.hidden;
+}
+```
+
+Mobile usa la body class (porque queremos opacidad y los hijos quedan en el DOM), desktop usa el `hidden` attribute del `<section>` entero (display:none, sin transición — el panel está en una esquina, animarlo es ruido). El ESC handler y el botón "ocultar" llaman a `setToolsHidden(!isMenuHidden())` y por ende funcionan en ambos layouts.
+
+### Default state al cargar imagen
+
+`loadImage()` y `restoreSession()` ahora hacen `setToolsHidden(isMobileLayout())`. Mobile: hidden. Desktop: visible. Es el momento que define el "default" de la sesión — todo gesto posterior es una transición desde ese estado.
+
+### Sin auto-restore
+
+Phase 1 tenía un timer (3 s) que volvía a mostrar el chrome. Phase 3 no — quitar el chrome es una intención persistente, no un peek temporal. Restaurar requiere acción explícita (tap, ESC, botón). Esto es coherente con cómo se comporta la mayoría de apps mobile (Photos no auto-restaura el bottom strip al pasar 3 s).
+
 ## Roadmap restante
 
-- **F. Bottom sheet con snap points** — el panel actual es estático con `max-height: 60vh`. F sería convertirlo en un drawer drag-to-snap (collapsed / mid / full). Cambio mayor — requiere más gestos coexistiendo con pinch/pan/tap. Considerar sólo si el feedback de E pide más control.
-- **G. Strip horizontal de sliders** — en pestaña ajustes mobile, reemplazar 9 sliders verticales por strip de íconos + un slider grande del ajuste activo. Estilo iPhone Photos. Rediseño del panel adjust.
-- **Tap-to-immerse desktop via keyboard shortcut** — agregar `f` o spacebar al keydown handler global llamando `toggleImmersed()`. Trivial pero no implementado todavía.
-- **Pinch zoom desktop via wheel** — ya está (Ctrl+wheel).
+- **F. Bottom sheet con snap points** — el `.panel` actual es estático con `max-height: 50vh`. F sería convertirlo en un drawer drag-to-snap (collapsed / mid / full). Cambio mayor — requiere agregar pointer handlers al `.panel` que coexistan con pan/pinch en el canvas y el scroll vertical interno del propio panel. Considerar sólo si el feedback pide más control.
+- **G. Strip horizontal de sliders** — en pestaña ajustes mobile, reemplazar 9 sliders verticales por strip de íconos + un slider grande del ajuste activo. Estilo iPhone Photos. Rediseño del panel adjust, ortogonal a Phase 3.
+- **Tap-to-toggle también en desktop via keyboard shortcut** — agregar `f` o spacebar al keydown handler global llamando `setToolsHidden(!isMenuHidden())`. Trivial — ESC ya hace lo mismo, sería un atajo alternativo.
+- **Pinch zoom desktop via wheel** — ya está (Ctrl/Cmd/Shift + wheel).
 
-Si volvés a tocar este área, leé esto antes de mover algo — la coexistencia entre pinch / pan / tap es delicada y los flags son fáciles de descoordinar.
+Si volvés a tocar este área, leé esto antes de mover algo — la coexistencia entre pinch / pan / tap / drag-to-hide es delicada y los flags son fáciles de descoordinar.

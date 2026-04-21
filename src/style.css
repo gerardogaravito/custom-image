@@ -753,103 +753,113 @@ select {
   }
 }
 
-/* ----- mobile UX: immersion + tweak states -------------------------------
- * Two opacity-driven modes for getting the chrome out of the way:
- *
- *  • `.is-immersed` (set on <body> via single tap on canvas) — fades all
- *    chrome to 10% so the user can see the photo unobstructed for a few
- *    seconds. Pointer events disabled while immersed so taps go to the
- *    canvas (and a second tap restores).
- *  • `.is-tweaking` (set on <body> while a slider/curve is being dragged) —
- *    fades only the tools panel to 50% so the user sees the live preview
- *    behind it without losing the slider thumb. Mobile only — desktop has
- *    the panel at the corner where it doesn't overlap the image.
+/* ----- tweak state (slider/curve drag) ----------------------------------
+ * `.is-tweaking` is set on <body> while a slider or curve point is being
+ * dragged. The mobile chrome fades to 50% so the user sees the live preview
+ * behind the bottom sheet without losing the slider thumb. Mobile only —
+ * desktop has the panel in a corner where it doesn't overlap the image.
  */
 .tools,
-.zoom,
-.ab-hint {
+.zoom {
   transition: opacity 200ms ease;
-}
-.is-immersed .tools,
-.is-immersed .zoom,
-.is-immersed .ab-hint {
-  opacity: 0.1;
-  pointer-events: none;
 }
 @media (hover: none) {
   .tools {
     transition: opacity 100ms ease;
   }
+  /* Opacity inherits to the .tools__bar + .panel children even though they're
+     position:fixed in mobile (descendant relationship in the DOM). */
   .is-tweaking .tools {
     opacity: 0.5;
   }
 }
 
-/* ----- mobile layout: tools panel anchored to the bottom -----------------
- * Phase 2 (point E in mobile-ux.md). On touch devices the floating top-right
- * panel forces the user to reach across the screen and covers the upper part
- * of the photo (typically where the subject lives). Anchoring the panel to
- * the bottom edge:
+/* ----- mobile layout: image-first model (Phase 3) ----------------------
+ * Section 7 in mobile-ux.md. Replaces the Phase 2 bottom-anchored panel.
  *
- *   • Puts controls in thumb-reach for one-handed use.
- *   • Frees the upper ~40% of the viewport so the subject is visible while
- *     adjusting sliders.
- *   • Mirrors the iPhone Photos / Instagram pattern users already know.
+ * Layout when the menu is visible:
+ *   • Zoom bar fixed at the top (always visible, even when menu hidden).
+ *   • Slim tabs+reset bar fixed right under the zoom bar.
+ *   • Active tab content as a translucent bottom sheet (max 50vh, scrolls).
  *
- * Companion changes:
- *   • #zoom moves to the top so it doesn't fight the panel for bottom space.
- *   • #ab-hint is hidden — its absolute position anchors below the panel,
- *     which would land off-screen. JS already short-circuits via
- *     computeAbHintTop, this is the belt-and-suspenders CSS guard.
- *   • The panel grows up to 60vh and scrolls internally (the adjust tab has
- *     9 sliders, easy to overflow in landscape on small phones).
- *   • .tools__bar is sticky inside the scrolling panel so the tab strip
- *     stays reachable while scrolling slider lists.
+ * Layout when the menu is hidden (`body.is-menu-hidden`, default state on
+ * mobile after image load):
+ *   • Only the zoom bar is visible.
+ *   • Image fills the screen — image-first like Lightroom Mobile / Photos.
+ *
+ * The `.tools` <section> becomes a logical container with no visual
+ * presence in mobile — its children (header.tools__bar + .panel divs) are
+ * positioned individually with position:fixed so they can live in opposite
+ * corners of the screen.
  */
 @media (hover: none) {
   .tools {
-    top: auto;
-    right: 0;
-    bottom: 0;
-    left: 0;
-    width: 100%;
-    /* Respect the iOS home indicator + any other bottom safe area. */
-    padding-bottom: env(safe-area-inset-bottom, 0);
-    /* Keep the panel from eating the whole viewport in landscape. */
-    max-height: 60vh;
-    /* Override the base `overflow: hidden` so the inner content scrolls
-       (only Y — X stays clipped, no horizontal scroll surprises). */
-    overflow-y: auto;
-    border-top: 1px solid var(--line);
-    border-right: none;
-    border-bottom: none;
-    border-left: none;
+    position: static;
+    width: auto;
+    background: transparent;
+    border: none;
+    overflow: visible;
   }
 
   .tools__bar {
-    /* Stick the tab strip + reset to the top of the scrolling panel so the
-       user can always switch tabs without scrolling back up. */
-    position: sticky;
-    top: 0;
-    /* Match the translucent panel bg so the sticky bar reads as part of the
-       chrome rather than floating over the slider list. */
+    /* Sit right under the zoom bar (zoom is at safe-area-top + ~12px and
+       ~36px tall, so ~56px from the top covers the gap comfortably). */
+    position: fixed;
+    top: calc(max(12px, env(safe-area-inset-top, 12px)) + 44px);
+    left: 0;
+    right: 0;
+    z-index: 11;
     background: rgba(17, 17, 17, 0.85);
     backdrop-filter: blur(16px) saturate(140%);
     -webkit-backdrop-filter: blur(16px) saturate(140%);
-    z-index: 1;
+    border-bottom: 1px solid var(--line);
+    transition: opacity 200ms ease, transform 200ms ease;
+  }
+
+  .panel {
+    /* Active tab content as a translucent bottom sheet anchored to the
+       bottom edge. Inactive panels still have `hidden` attr → display:none. */
+    position: fixed;
+    bottom: 0;
+    left: 0;
+    right: 0;
+    z-index: 11;
+    max-height: 50vh;
+    overflow-y: auto;
+    padding-bottom: max(14px, env(safe-area-inset-bottom, 14px));
+    background: rgba(17, 17, 17, 0.85);
+    backdrop-filter: blur(16px) saturate(140%);
+    -webkit-backdrop-filter: blur(16px) saturate(140%);
+    border-top: 1px solid var(--line);
+    transition: opacity 200ms ease, transform 200ms ease;
+  }
+
+  /* Hidden state: fade out + small slide away from the canvas. The chrome
+     stays in the DOM (tap-to-toggle re-shows it), pointer-events:none lets
+     touches pass through to the canvas underneath. */
+  .is-menu-hidden .tools__bar {
+    opacity: 0;
+    pointer-events: none;
+    transform: translateY(-8px);
+  }
+  .is-menu-hidden .panel {
+    opacity: 0;
+    pointer-events: none;
+    transform: translateY(8px);
   }
 
   .zoom {
-    /* Give the bottom edge to the tools panel; zoom moves up. The safe-area
-       fallback keeps it clear of the dynamic island / notch. */
+    /* Zoom bar is always visible at the top — even when the menu is hidden
+       (default state on mobile). It's slim and gives constant feedback on
+       the current zoom %. */
     bottom: auto;
     top: max(12px, env(safe-area-inset-top, 12px));
   }
 
   .ab-hint {
-    /* Hint anchors below the tools panel — pointless when the panel is itself
-       at the bottom edge. JS skips it via computeAbHintTop(); this is the
-       safety net. */
+    /* Hint anchors below the (desktop) tools panel; in mobile it has nowhere
+       reasonable to live with the new layout. JS already skips it via
+       computeAbHintTop(); this is the belt-and-suspenders. */
     display: none;
   }
 }
