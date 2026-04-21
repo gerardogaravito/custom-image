@@ -10,7 +10,7 @@ export default defineConfig({
       reporter: ['text', 'html'],
       // Only measure modules with pure logic that we actually unit-test.
       // main.ts and toast.ts are DOM wiring; covered via manual / e2e instead.
-      include: ['src/curves.ts', 'src/pipeline.ts', 'src/heic.ts', 'src/crop.ts', 'src/undo.ts'],
+      include: ['src/curves.ts', 'src/pipeline.ts', 'src/heic.ts', 'src/crop.ts', 'src/undo.ts', 'src/layout.ts', 'src/gestures.ts'],
       exclude: ['src/main.ts', 'src/toast.ts', 'src/test/**', 'src/**/*.test.ts'],
       thresholds: {
         statements: 95,

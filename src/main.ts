@@ -24,6 +24,8 @@ import {
 import { History } from './undo';
 import { type Session, clearSession, loadSession, saveSession } from './persist';
 import { HINTS, MOBILE_UX } from './config';
+import { computeAbHintTop, isMobileLayout } from './layout';
+import { countTouchPointers } from './gestures';
 import type { Adjust, Curves, State, Channel } from './types';
 import { defaultAdjust } from './types';
 
@@ -371,7 +373,9 @@ function updatePannableState() {
 }
 
 // --- shared pointer tracking ---
-const activePointers = new Map<number, { x: number; y: number }>();
+// `type` (pointerType) is captured so the pinch path can filter to real touches
+// only — see countTouchPointers + the regression notes in mobile-ux.md § 5.
+const activePointers = new Map<number, { x: number; y: number; type: string }>();
 
 // --- single-finger pan state ---
 type PanState = { startX: number; startY: number; scrollX: number; scrollY: number };
@@ -394,8 +398,12 @@ let tapCandidate: TapCandidate | null = null;
 let multiTouchInGesture = false;
 
 function pinchCenterAndDistance(): { center: { x: number; y: number }; distance: number } | null {
-  if (activePointers.size < 2) return null;
-  const [a, b] = [...activePointers.values()];
+  // Pinch is a fingers-only gesture: filter out any mouse/pen pointers that
+  // might also be tracked. Without this filter a stray mouse pointer would
+  // pair with a real touch and produce a wrong center/distance.
+  const touches = [...activePointers.values()].filter((p) => p.type === 'touch');
+  if (touches.length < 2) return null;
+  const [a, b] = touches;
   return {
     center: { x: (a.x + b.x) / 2, y: (a.y + b.y) / 2 },
     distance: Math.hypot(b.x - a.x, b.y - a.y),
@@ -406,10 +414,14 @@ view.addEventListener('pointerdown', (e) => {
   // Crop mode owns pointer events on the canvas via its overlay
   if (cropActive) return;
 
-  activePointers.set(e.pointerId, { x: e.clientX, y: e.clientY });
+  activePointers.set(e.pointerId, { x: e.clientX, y: e.clientY, type: e.pointerType });
 
-  // Two pointers down → switch to pinch mode, cancel any single-finger gesture
-  if (activePointers.size === 2) {
+  // Two REAL touches down → enter pinch mode. Mouse / pen are excluded:
+  // pinch is a fingers gesture, and counting them used to fire phantom pinch
+  // zoom on plain mouse drag whenever a stale pointer was lying around in
+  // activePointers (e.g. a previous pointercancel that we missed). See the
+  // postmortem in mobile-ux.md § 5.
+  if (countTouchPointers(activePointers.values()) >= 2) {
     multiTouchInGesture = true;
     tapCandidate = null;
     if (pan) {
@@ -429,40 +441,43 @@ view.addEventListener('pointerdown', (e) => {
     return;
   }
 
-  // First pointer down — could become a tap, a pan, or part of a pinch
-  if (activePointers.size === 1) {
-    multiTouchInGesture = false;
-    if (e.pointerType !== 'mouse') {
-      // Touch / pen: candidate for tap-to-immerse (mouse uses click handlers
-      // elsewhere — would conflict with normal clicks)
-      tapCandidate = {
-        x: e.clientX,
-        y: e.clientY,
-        t: Date.now(),
-        pointerId: e.pointerId,
-        pointerType: e.pointerType,
-      };
-    }
-    if (e.button !== 0) return;
-    const overflowsX = viewport.scrollWidth > viewport.clientWidth;
-    const overflowsY = viewport.scrollHeight > viewport.clientHeight;
-    if (overflowsX || overflowsY) {
-      pan = {
-        startX: e.clientX,
-        startY: e.clientY,
-        scrollX: viewport.scrollLeft,
-        scrollY: viewport.scrollTop,
-      };
-      view.classList.add('is-panning');
-      view.setPointerCapture(e.pointerId);
-    }
-    e.preventDefault();
+  // Single-pointer path: pan (any device) and tap-to-immerse (touch / pen).
+  // We deliberately don't gate on `activePointers.size === 1` anymore — if a
+  // stale pointer is in the Map, the new pointer should still be allowed to
+  // start its gesture rather than getting silently dropped.
+  multiTouchInGesture = false;
+  if (e.pointerType !== 'mouse') {
+    // Touch / pen: candidate for tap-to-immerse (mouse uses click handlers
+    // elsewhere — would conflict with normal clicks).
+    tapCandidate = {
+      x: e.clientX,
+      y: e.clientY,
+      t: Date.now(),
+      pointerId: e.pointerId,
+      pointerType: e.pointerType,
+    };
   }
+  if (e.button !== 0) return;
+  const overflowsX = viewport.scrollWidth > viewport.clientWidth;
+  const overflowsY = viewport.scrollHeight > viewport.clientHeight;
+  if (overflowsX || overflowsY) {
+    pan = {
+      startX: e.clientX,
+      startY: e.clientY,
+      scrollX: viewport.scrollLeft,
+      scrollY: viewport.scrollTop,
+    };
+    view.classList.add('is-panning');
+    view.setPointerCapture(e.pointerId);
+  }
+  e.preventDefault();
 });
 
 window.addEventListener('pointermove', (e) => {
   if (!activePointers.has(e.pointerId)) return;
-  activePointers.set(e.pointerId, { x: e.clientX, y: e.clientY });
+  // Preserve the pointer's `type` across updates — only x/y change as it moves.
+  const existing = activePointers.get(e.pointerId)!;
+  activePointers.set(e.pointerId, { x: e.clientX, y: e.clientY, type: existing.type });
 
   // Disqualify tap candidate as soon as the pointer moves more than threshold
   if (tapCandidate && tapCandidate.pointerId === e.pointerId) {
@@ -471,7 +486,7 @@ window.addEventListener('pointermove', (e) => {
     if (Math.hypot(dx, dy) > MOBILE_UX.tapMaxPx) tapCandidate = null;
   }
 
-  if (pinch && activePointers.size >= 2) {
+  if (pinch && countTouchPointers(activePointers.values()) >= 2) {
     const cd = pinchCenterAndDistance()!;
     // Combined zoom + pan in one math step. Derivation in mobile-ux.md skill doc.
     const ratio = cd.distance / pinch.startDistance;
@@ -499,7 +514,9 @@ window.addEventListener('pointerup', (e) => {
   const wasTracked = activePointers.has(e.pointerId);
   activePointers.delete(e.pointerId);
 
-  if (pinch && activePointers.size < 2) pinch = null;
+  // End pinch when fewer than 2 real touches remain (consistent with the
+  // pointerdown gate — see countTouchPointers).
+  if (pinch && countTouchPointers(activePointers.values()) < 2) pinch = null;
 
   if (pan && activePointers.size === 0) {
     pan = null;
@@ -519,6 +536,22 @@ window.addEventListener('pointerup', (e) => {
   }
   tapCandidate = null;
 
+  if (activePointers.size === 0) multiTouchInGesture = false;
+});
+
+// pointercancel fires when the OS / browser interrupts a gesture (system
+// gestures, alert dialogs, focus loss, force-touch on some trackpads). Without
+// this handler the cancelled pointer stays in `activePointers` forever — the
+// next click pairs with it and trips the "two pointers down" path. That was
+// the root cause of the desktop phantom-pinch on plain mouse drag.
+window.addEventListener('pointercancel', (e) => {
+  activePointers.delete(e.pointerId);
+  if (pinch && countTouchPointers(activePointers.values()) < 2) pinch = null;
+  if (pan && activePointers.size === 0) {
+    pan = null;
+    view.classList.remove('is-panning');
+  }
+  if (tapCandidate?.pointerId === e.pointerId) tapCandidate = null;
   if (activePointers.size === 0) multiTouchInGesture = false;
 });
 
@@ -543,15 +576,24 @@ $<HTMLButtonElement>('#zoom-out').addEventListener('click', () => zoomBy(1 / ZOO
 $<HTMLButtonElement>('#zoom-fit').addEventListener('click', () => setZoom('fit'));
 $<HTMLButtonElement>('#zoom-100').addEventListener('click', () => setZoom(1));
 
-// Ctrl/Cmd + wheel to zoom around the cursor (matches browser convention).
+// Ctrl/Cmd/Shift + wheel to zoom around the cursor.
+//   • Ctrl/Cmd matches the universal browser convention (page zoom).
+//   • Shift is added because trackpad-only users (no scroll wheel) often have
+//     a hard time triggering the ctrlKey on a trackpad pinch — shift+two-finger
+//     scroll is more discoverable and ergonomic on Mac laptops.
 // Trackpads emit many small events; a fixed step (e.g. *1.25 per tick) feels
 // hyper-sensitive. Using `exp(-deltaY * k)` makes the zoom proportional to the
 // gesture magnitude — works for both trackpads and mouse wheels.
 viewport.addEventListener('wheel', (e) => {
   if (!preview) return;
-  if (!(e.ctrlKey || e.metaKey)) return;
+  if (!(e.ctrlKey || e.metaKey || e.shiftKey)) return;
   e.preventDefault();
-  let factor = Math.exp(-e.deltaY * ZOOM_WHEEL_SENSITIVITY);
+  // Browsers map shift+wheel to horizontal scroll on most platforms by sending
+  // the scroll magnitude on `deltaX` instead of `deltaY`. Fall back to deltaX
+  // so a "shift+wheel down" actually feels like a zoom-in regardless of which
+  // axis the browser populated.
+  const delta = e.deltaY !== 0 ? e.deltaY : e.deltaX;
+  let factor = Math.exp(-delta * ZOOM_WHEEL_SENSITIVITY);
   factor = Math.max(1 / ZOOM_WHEEL_PER_EVENT_CAP, Math.min(ZOOM_WHEEL_PER_EVENT_CAP, factor));
   zoomBy(factor, { x: e.clientX, y: e.clientY });
 }, { passive: false });
@@ -689,11 +731,17 @@ let abHintTimer = 0;
 function showAbHint() {
   if (abHintShown) return;
   if (!HINTS.ab) return; // disabled by config — skip render entirely
+  // Position right below the tools panel (its height varies per active tab).
+  // On mobile the panel is anchored to the bottom — computeAbHintTop returns
+  // null and we skip the render entirely. Don't flip `abHintShown` until we're
+  // committed: that way a viewport rotation desktop ↔ mobile still gets a
+  // chance to show the hint once it has room.
+  const r = tools.getBoundingClientRect();
+  const top = computeAbHintTop(r.bottom, isMobileLayout());
+  if (top === null) return;
   abHintShown = true;
   abHint.textContent = HINTS.ab;
-  // Position right below the tools panel (its height varies per active tab)
-  const r = tools.getBoundingClientRect();
-  abHint.style.top = `${r.bottom + 8}px`;
+  abHint.style.top = `${top}px`;
   abHint.hidden = false;
   requestAnimationFrame(() => abHint.classList.add('is-in'));
   abHintTimer = window.setTimeout(dismissAbHint, HINTS.abDurationSeconds * 1000);

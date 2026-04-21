@@ -121,14 +121,111 @@ export const MOBILE_UX = {
 };
 ```
 
-## Lo que NO está en Phase 1 (roadmap)
+## 4. Phase 2 — panel al fondo en mobile (punto E)
 
-Discutido en chat y dejado para después:
+CSS-only para reubicar `#tools` y compañía en touch devices. Cero cambios en el área de gestos.
 
-- **E. Tools al fondo en mobile** — reposicionar `#tools` a `bottom: 0` con media query. Más cerca del pulgar. Cambio de layout puntual.
-- **F. Bottom sheet con snap points** — restructurar el panel como un drawer estilo iOS Maps con 3 estados (collapsed / mid / full). Cambio mayor.
-- **G. Strip horizontal de sliders** — en la pestaña ajustes, en mobile, replazar los 9 sliders verticales por un strip horizontal de íconos + un slider grande para el ajuste activo. Estilo iPhone Photos. Rediseño del panel.
-- **Tap-to-immerse en desktop via keyboard shortcut** — agregar `f` o spacebar al keydown handler global llamando `toggleImmersed()`.
-- **Pinch zoom desktop via wheel** — ya está (Ctrl+wheel). No requiere cambios.
+### Layout
+
+```css
+@media (hover: none) {
+  .tools {
+    top: auto; right: 0; bottom: 0; left: 0;
+    width: 100%;
+    padding-bottom: env(safe-area-inset-bottom, 0);
+    max-height: 60vh;
+    overflow-y: auto;
+    /* border-top only — el panel "flota" sobre el borde inferior */
+  }
+  .tools__bar { position: sticky; top: 0; /* + bg translucido */ }
+  .zoom { bottom: auto; top: max(12px, env(safe-area-inset-top, 12px)); }
+  .ab-hint { display: none; }
+}
+```
+
+### Por qué cada decisión
+
+- **bottom-anchored full-width**: pulgar alcanza naturalmente, libera el ~40% superior del viewport (donde típicamente está el sujeto). Mirror del patrón iPhone Photos / Instagram.
+- **`max-height: 60vh` + `overflow-y: auto`**: la pestaña ajustes tiene 9 sliders. En landscape o teléfonos chicos, sin esto el panel desborda el viewport. Override del `overflow: hidden` base — sólo Y, X queda hidden (no horizontal scroll surprises).
+- **`.tools__bar` sticky**: cuando la lista de sliders es scrolleable, las tabs tienen que quedar siempre accesibles sin scrollear arriba. Background translúcido propio para que la barra "flote" visualmente sobre el contenido scrolleado.
+- **`.zoom` arriba**: la barra de zoom estaba en `bottom: 24px`. El panel ahora ocupa esa franja, así que la zoom se va al top con `safe-area-inset-top` para no chocar con notch / dynamic island.
+- **`.ab-hint` `display: none`**: el hint anclaba justo debajo del panel. Con el panel ya en el fondo, "debajo" = fuera de pantalla. JS también skipea el render (`computeAbHintTop` retorna `null`), pero CSS es belt-and-suspenders por si alguien re-habilita.
+- **safe-area-inset-bottom**: respeta home indicator de iOS. Sin esto, el padding inferior queda tapado por el indicator.
+
+### JS adyacente
+
+`src/layout.ts` exporta:
+
+```ts
+isMobileLayout(): boolean   // wrapper de matchMedia('(hover: none)'), Node-safe
+computeAbHintTop(toolsBottom, isMobile, gap=8): number | null
+```
+
+`computeAbHintTop` retorna `null` en mobile → `showAbHint()` en `main.ts` early-return antes de marcar `abHintShown`. Eso permite que si el user rota desktop ↔ mobile, el hint todavía pueda aparecer una vez cuando hay espacio. Tests en `src/layout.test.ts`.
+
+### Lo que NO se rompió
+
+- Inmersión (Phase 1) sigue igual — sólo es opacidad.
+- `.is-tweaking` auto-fade sigue igual.
+- Pinch / pan / tap discrimination sin tocar.
+- Desktop layout idéntico (todo dentro de `@media (hover: none)`).
+
+## 5. Postmortem — phantom pinch en desktop
+
+Bug detectado durante Phase 2 testing. Síntoma: en desktop, click + drag con mouse hacía un zoom out a un valor específico (ej: 45% → 19%). Reproducible incluso con la imagen en `ajustar` (sin overflow, sin pan posible). Bug preexistente — Phase 1/2 no lo causaron, sólo lo expusieron al testear más gestos.
+
+### Causa
+
+Dos factores combinados:
+
+1. **`activePointers` mezclaba mouse y touch.** El check `if (activePointers.size === 2)` no discriminaba por tipo. Un mouse pointer + un pointer huérfano = size 2 → entraba al branch de pinch.
+2. **No había handler de `pointercancel`.** Cuando el OS / browser cancela un gesto (system gesture, alert, force-touch del trackpad de Mac, focus loss, devtools que captura), dispara `pointercancel` en lugar de `pointerup`. Sin handler, el pointer quedaba huérfano en `activePointers` para siempre. El próximo click pareaba con el huérfano → pinch falsa → `setZoom(startZoom * distance/startDistance)` con valores arbitrarios.
+
+### Fix
+
+`src/gestures.ts` (testeado en `gestures.test.ts`):
+
+```ts
+export function countTouchPointers(pointers: Iterable<{ type: string }>): number {
+  let n = 0;
+  for (const p of pointers) if (p.type === 'touch') n++;
+  return n;
+}
+```
+
+`activePointers` ahora también guarda `type` (pointerType). Las decisiones de pinch usan `countTouchPointers(activePointers.values()) >= 2` en lugar de `activePointers.size`. Mouse y pen no cuentan — pinch es por definición un gesto de dedos, ningún otro device puede hacerlo de verdad.
+
+`pinchCenterAndDistance()` también filtra a touches-only — si por algún motivo hay 3 pointers (2 touch + 1 mouse huérfano), el center/distance se calcula sólo con los 2 touches reales.
+
+Handler nuevo de `pointercancel` (mismo flow que pointerup pero sin trigger de tap):
+
+```ts
+window.addEventListener('pointercancel', (e) => {
+  activePointers.delete(e.pointerId);
+  if (pinch && countTouchPointers(activePointers.values()) < 2) pinch = null;
+  if (pan && activePointers.size === 0) { pan = null; view.classList.remove('is-panning'); }
+  if (tapCandidate?.pointerId === e.pointerId) tapCandidate = null;
+  if (activePointers.size === 0) multiTouchInGesture = false;
+});
+```
+
+También se removió el outer `if (activePointers.size === 1)` del pointerdown (después del check de pinch) — si hay un huérfano, el nuevo pointer todavía debe poder iniciar pan/tap en lugar de quedar silenciosamente descartado.
+
+### Lo que NO se rompió
+
+Casos a verificar después de tocar el área:
+- Mobile single tap → `toggleImmersed`
+- Mobile pinch (2 dedos) → `countTouchPointers === 2` → entra a pinch
+- Mobile single-finger pan (con overflow) → pan
+- Desktop click sin overflow → ni pan, ni pinch, ni tap (correcto, no debe pasar nada)
+- Desktop click+drag con overflow → pan funciona
+- Desktop click+drag con orphan pointer → no más phantom pinch (fix)
+
+## Roadmap restante
+
+- **F. Bottom sheet con snap points** — el panel actual es estático con `max-height: 60vh`. F sería convertirlo en un drawer drag-to-snap (collapsed / mid / full). Cambio mayor — requiere más gestos coexistiendo con pinch/pan/tap. Considerar sólo si el feedback de E pide más control.
+- **G. Strip horizontal de sliders** — en pestaña ajustes mobile, reemplazar 9 sliders verticales por strip de íconos + un slider grande del ajuste activo. Estilo iPhone Photos. Rediseño del panel adjust.
+- **Tap-to-immerse desktop via keyboard shortcut** — agregar `f` o spacebar al keydown handler global llamando `toggleImmersed()`. Trivial pero no implementado todavía.
+- **Pinch zoom desktop via wheel** — ya está (Ctrl+wheel).
 
 Si volvés a tocar este área, leé esto antes de mover algo — la coexistencia entre pinch / pan / tap es delicada y los flags son fáciles de descoordinar.

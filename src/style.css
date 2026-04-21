@@ -688,3 +688,72 @@ select {
     opacity: 0.5;
   }
 }
+
+/* ----- mobile layout: tools panel anchored to the bottom -----------------
+ * Phase 2 (point E in mobile-ux.md). On touch devices the floating top-right
+ * panel forces the user to reach across the screen and covers the upper part
+ * of the photo (typically where the subject lives). Anchoring the panel to
+ * the bottom edge:
+ *
+ *   • Puts controls in thumb-reach for one-handed use.
+ *   • Frees the upper ~40% of the viewport so the subject is visible while
+ *     adjusting sliders.
+ *   • Mirrors the iPhone Photos / Instagram pattern users already know.
+ *
+ * Companion changes:
+ *   • #zoom moves to the top so it doesn't fight the panel for bottom space.
+ *   • #ab-hint is hidden — its absolute position anchors below the panel,
+ *     which would land off-screen. JS already short-circuits via
+ *     computeAbHintTop, this is the belt-and-suspenders CSS guard.
+ *   • The panel grows up to 60vh and scrolls internally (the adjust tab has
+ *     9 sliders, easy to overflow in landscape on small phones).
+ *   • .tools__bar is sticky inside the scrolling panel so the tab strip
+ *     stays reachable while scrolling slider lists.
+ */
+@media (hover: none) {
+  .tools {
+    top: auto;
+    right: 0;
+    bottom: 0;
+    left: 0;
+    width: 100%;
+    /* Respect the iOS home indicator + any other bottom safe area. */
+    padding-bottom: env(safe-area-inset-bottom, 0);
+    /* Keep the panel from eating the whole viewport in landscape. */
+    max-height: 60vh;
+    /* Override the base `overflow: hidden` so the inner content scrolls
+       (only Y — X stays clipped, no horizontal scroll surprises). */
+    overflow-y: auto;
+    border-top: 1px solid var(--line);
+    border-right: none;
+    border-bottom: none;
+    border-left: none;
+  }
+
+  .tools__bar {
+    /* Stick the tab strip + reset to the top of the scrolling panel so the
+       user can always switch tabs without scrolling back up. */
+    position: sticky;
+    top: 0;
+    /* Match the translucent panel bg so the sticky bar reads as part of the
+       chrome rather than floating over the slider list. */
+    background: rgba(17, 17, 17, 0.85);
+    backdrop-filter: blur(16px) saturate(140%);
+    -webkit-backdrop-filter: blur(16px) saturate(140%);
+    z-index: 1;
+  }
+
+  .zoom {
+    /* Give the bottom edge to the tools panel; zoom moves up. The safe-area
+       fallback keeps it clear of the dynamic island / notch. */
+    bottom: auto;
+    top: max(12px, env(safe-area-inset-top, 12px));
+  }
+
+  .ab-hint {
+    /* Hint anchors below the tools panel — pointless when the panel is itself
+       at the bottom edge. JS skips it via computeAbHintTop(); this is the
+       safety net. */
+    display: none;
+  }
+}
