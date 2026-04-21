@@ -539,6 +539,19 @@ window.addEventListener('pointerup', (e) => {
   if (activePointers.size === 0) multiTouchInGesture = false;
 });
 
+// iOS Safari ships its own pinch zoom on top of Pointer Events, fired through
+// the WebKit-only `gesturestart` / `gesturechange` / `gestureend` events. The
+// `<meta name="viewport" maximum-scale=1 user-scalable=no>` declaration is
+// ignored on iOS for accessibility reasons, so we have to suppress the gesture
+// events explicitly. Without this, a two-finger pinch on the page triggered
+// BOTH the browser's page zoom AND our canvas pinch — the page zoom made the
+// position:fixed chrome (tools panel, zoom bar) appear to disappear and
+// double-fired the pinch math. document-level so suppression covers fingers
+// landing outside the canvas (e.g. on the menu) as well. See mobile-ux.md § 6.
+['gesturestart', 'gesturechange', 'gestureend'].forEach((eventName) => {
+  document.addEventListener(eventName, (e) => e.preventDefault(), { passive: false });
+});
+
 // pointercancel fires when the OS / browser interrupts a gesture (system
 // gestures, alert dialogs, focus loss, force-touch on some trackpads). Without
 // this handler the cancelled pointer stays in `activePointers` forever — the

@@ -221,6 +221,53 @@ Casos a verificar después de tocar el área:
 - Desktop click+drag con overflow → pan funciona
 - Desktop click+drag con orphan pointer → no más phantom pinch (fix)
 
+## 6. Suppresión del pinch zoom nativo de iOS Safari
+
+iOS Safari implementa su propio pinch zoom de página que **ignora** la directiva `<meta name="viewport" maximum-scale=1 user-scalable=no>` desde Safari ~10 (decisión de accesibilidad de Apple — los usuarios deben poder hacer zoom para acomodar problemas de visión).
+
+Ese pinch nativo se dispara a través de eventos WebKit-only: `gesturestart`, `gesturechange`, `gestureend`. Estos son **independientes** de los Pointer Events que usamos para nuestra lógica de pinch — `e.preventDefault()` en `pointerdown/move` no los suprime.
+
+### El bug que esto causa
+
+Sin suppression de gesture events, un pinch en mobile dispara DOS cosas en paralelo:
+
+1. **Browser page zoom**: toda la página (canvas + chrome) se ampliaba. Los elementos `position: fixed` (tools panel, zoom bar) se "desvanecían" porque salían del viewport ampliado.
+2. **Nuestro custom pinch**: el handler de `pointermove` con `countTouchPointers >= 2` también corría, llamando `setZoom()` con valores arbitrarios.
+
+Resultado visual: caos. La UI pareciera "saltar" y el zoom no respeta lo que hicimos.
+
+### Fix
+
+Dos partes, ambas mínimas:
+
+**1. CSS — `touch-action: none` en `#viewport`:**
+
+```css
+#viewport { touch-action: none; }
+```
+
+Le dice al browser "yo manejo todos los gestos táctiles dentro de este elemento". Anula scroll/pan/pinch nativos por touch. **Mouse wheel sigue funcionando** — `touch-action` solo afecta input táctil. Como ya hacemos pan manual via `viewport.scrollLeft/scrollTop` en pointer handlers, no perdemos funcionalidad.
+
+**2. JS — suppress gesture events a nivel `document`:**
+
+```ts
+['gesturestart', 'gesturechange', 'gestureend'].forEach((eventName) => {
+  document.addEventListener(eventName, (e) => e.preventDefault(), { passive: false });
+});
+```
+
+Por qué a nivel `document` y no `viewport`: si el usuario apoya un dedo en el menu (panel) y otro en el canvas, los gesture events salen del menu (que está fuera de `#viewport`). Suprimir a nivel document atrapa todos los casos. `passive: false` es obligatorio para que `preventDefault()` funcione.
+
+### Por qué no `meta viewport` solo
+
+Probamos. iOS lo ignora. Cualquier app web que necesite suprimir pinch en iOS DEBE escuchar gesture events. Es el ÚNICO mecanismo que funciona consistentemente.
+
+### Compatibilidad
+
+- **iOS Safari**: gesture events son la API nativa, perfecto.
+- **Chrome/Firefox/otros**: no disparan gesture events. Los listeners son no-ops, sin overhead.
+- **Desktop**: `touch-action` afecta solo input táctil. Mouse + trackpad scroll wheel siguen funcionando exactamente igual.
+
 ## Roadmap restante
 
 - **F. Bottom sheet con snap points** — el panel actual es estático con `max-height: 60vh`. F sería convertirlo en un drawer drag-to-snap (collapsed / mid / full). Cambio mayor — requiere más gestos coexistiendo con pinch/pan/tap. Considerar sólo si el feedback de E pide más control.
