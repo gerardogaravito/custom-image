@@ -62,6 +62,12 @@ body {
   letter-spacing: 0;
   overflow: hidden;
   -webkit-font-smoothing: antialiased;
+  /* iOS Safari ignores `<meta name="viewport" maximum-scale=1>` for a11y
+     reasons. Without explicit text-size-adjust, an accessibility text-size
+     bump (or auto-resize on position:fixed chrome) can blow up the menu
+     to absurd sizes — see mobile-ux.md § 7 postmortem. */
+  -webkit-text-size-adjust: 100%;
+  text-size-adjust: 100%;
 }
 
 button,
@@ -386,6 +392,10 @@ select {
      during any in-app interaction. */
   z-index: 50;
   user-select: none;
+  /* Same gesture-block as .tools__bar — a pinch landing on the zoom bar
+     would otherwise scale the page in iOS Safari. Tap-to-button still works,
+     touch-action only affects gestures. */
+  touch-action: none;
 }
 .zoom button {
   background: transparent;
@@ -827,6 +837,12 @@ select {
     visibility: visible;
     transition: opacity 160ms ease, transform 160ms ease,
                 visibility 0s linear 0s;
+    /* Block iOS pinch + double-tap zoom on the chrome. Without this, a
+       pinch landing on the bar (which lives outside #viewport) triggers the
+       browser's page zoom, which on iPhone scales the position:fixed UI to
+       absurd sizes while leaving the canvas at intrinsic resolution. Tap
+       events still fire normally — touch-action only gates gestures. */
+    touch-action: none;
   }
 
   .panel {
@@ -851,6 +867,11 @@ select {
     visibility: visible;
     transition: opacity 160ms ease, transform 160ms ease,
                 visibility 0s linear 0s;
+    /* Allow vertical scroll within the panel (9 sliders in adjustments
+       can overflow on small phones in landscape) but block pinch +
+       double-tap zoom that would scale the chrome. Sliders work via the
+       <input type="range"> own pointer logic — independent of touch-action. */
+    touch-action: pan-y;
   }
 
   /* Hidden state: fade out + small slide away from the canvas, then flip

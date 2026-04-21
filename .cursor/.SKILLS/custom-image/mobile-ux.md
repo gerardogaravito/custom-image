@@ -372,7 +372,7 @@ Phase 1 tenía un timer (3 s) que volvía a mostrar el chrome. Phase 3 no — qu
 
 ### Postmortem — bugs detectados después del deploy inicial de Phase 3
 
-Tres bugs salieron al testear en iPhone real. Fix en el mismo commit que el doc.
+Cuatro bugs salieron al testear en iPhone real. Fix en el mismo commit que el doc.
 
 **1. El menú no aparecía aunque cliquearas "menu"**
 
@@ -399,7 +399,31 @@ Causa: `.tools__bar` con `position: fixed; left: 0; right: 0` (full viewport wid
 
 Fix: clamp del ancho a `min(100vw, 320px)` en `.tools__bar` y `.panel`, centrados con `left: 50%; transform: translateX(-50%)`. Coincide con el ancho fijo del panel desktop (320 px) y nunca excede el viewport. La animación de hide combina ambos transforms: `translateX(-50%) translateY(±8px)`.
 
-**3. Tap-to-hide se quedaba en "muy transparente" pero no escondía**
+**3. Pinch sobre el chrome explotaba la UI a tamaño absurdo**
+
+Síntoma: un pinch que aterrizara sobre `.tools__bar`, `.panel` o `.zoom` (todos `position: fixed` fuera de `#viewport`) hacía que iOS Safari escalara la página entera. El chrome (que vive como `position: fixed`) quedaba renderizado a tamaño grotesco, mientras el canvas (intrinsic pixels) se mantenía a su tamaño real. Resultado: tabs y zoom bar ocupaban media pantalla, sliders empujados fuera del viewport visual, panel "desaparecido".
+
+Causa: § 6 había aplicado `touch-action: none` SÓLO a `#viewport`. El chrome quedó sin protección — ahí iOS sí dispara su pinch nativo. La suppression document-level de `gesturestart/change/end` (§ 6) es belt-and-suspenders pero no siempre llega antes que el motor de zoom de WebKit empiece a escalar.
+
+Fix: `touch-action` explícito en cada elemento del chrome:
+
+```css
+.tools__bar, .zoom { touch-action: none; }   /* tap funciona, pinch no */
+.panel            { touch-action: pan-y; }   /* permite scroll vertical interno */
+```
+
+`touch-action` afecta sólo gestos, no eventos `click` — los buttons siguen funcionando con tap. `.panel` necesita `pan-y` para que el scroll interno (cuando los sliders desbordan en landscape) siga andando; los `<input type="range">` adentro funcionan con su propia lógica de pointer events, indiferente al touch-action del padre.
+
+Defensa adicional en `html, body`:
+
+```css
+-webkit-text-size-adjust: 100%;
+text-size-adjust: 100%;
+```
+
+Evita que iOS auto-resize texto en chrome `position: fixed` cuando el sistema tiene "Larger Text" en accesibilidad, o cuando un (residual) page-zoom escapa los handlers anteriores.
+
+**4. Tap-to-hide se quedaba en "muy transparente" pero no escondía**
 
 Síntoma: el panel se ponía a opacidad muy baja pero seguía interceptando toques / tapando visualmente la imagen. Causa primaria: bug #1 — el `<section>` con `hidden` attr nunca renderizaba, pero el fade no era observable porque no había nada que esconder; el usuario lo describía como "transparente" probablemente al ver el último frame antes de que el class lo apagara visualmente.
 
