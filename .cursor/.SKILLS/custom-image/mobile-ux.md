@@ -502,6 +502,169 @@ Por qué no probamos primero quitar `overflow-y: auto`: porque el panel de ajust
 
 Side note: el `will-change` también suaviza la animación de fade en Android low-end, así que pago el cost de un GPU layer extra a cambio de un fix robusto + mejor perf de animación.
 
+**7. El panel sigue sin pintar — `position: fixed` + `bottom: 0` mal posicionado en iOS Safari**
+
+Síntoma: incluso después del fix #6, en iPhone real (Safari 17, iOS 17, abril 2026) el panel seguía sin aparecer al mostrar el menú. Quitar `is-menu-hidden` (con un botón de debug) hacía que el panel se volviera visible (`opacity: 1`, `visibility: visible`) pero **no estaba en el viewport** — estaba completamente arriba del top edge de la pantalla.
+
+Diagnóstico (vía debug HUD que pinta `getComputedStyle` + `getBoundingClientRect` cada 200 ms en una capa `position: fixed; z-index: 9999` sobre la app):
+
+```
+panel:  rect x=37 y=-370 w=320 h=371
+        position=fixed top=-370.5px bottom=0px
+        transform=none
+#tools: rect x=0 y=0 w=393 h=0
+        display=block position=static
+html:   client=393x659  scroll=393x659    ← html llena el viewport
+body:   client=393x659  scroll=393x659    ← body también
+vw=393  vh=659
+```
+
+La fórmula que usa el browser para `position: fixed` con `bottom: 0` y `height: 370.5px`:
+
+```
+top + height + bottom = containingBlockHeight
+-370.5 + 370.5 + 0 = 0
+```
+
+El containing block tiene **height = 0**. Eso es exactamente lo que mide `#tools` (la `<section>` parent) — colapsada a 0 px porque todos sus hijos son `position: fixed` (out of flow). iOS Safari está usando `#tools` como containing block del `.panel` en vez del viewport, **violando el spec** (per CSS spec, el CB de un `position: fixed` es el initial containing block — el viewport — salvo que un ancestro tenga `transform`, `filter`, `will-change: transform/filter`, `contain`, `perspective` o `backdrop-filter`).
+
+Ningún ancestro del panel tiene esas propiedades. `html`/`body` están en valores default (sólo `touch-action: manipulation`, `overflow: hidden`, `height: 100%` — nada que cree un nuevo CB). `#tools` es `position: static`. Bug de Safari iOS, fin.
+
+Por qué `.tools__bar` (sibling, también `position: fixed`) NO sufre: usa `top: 56px` en lugar de `bottom: 0`. `top` se mide desde y=0 hacia abajo — y=0 del CB de 0-height y y=0 del viewport coinciden, así que la fórmula da el mismo resultado en ambos casos. **Sólo `bottom` (o `right`) expone el bug**, porque dependen de la dimensión del CB.
+
+Fix: anclar el panel al borde inferior **vía `transform: translateY(...)`** desde `top: 0`, en vez de usar `bottom: 0`. Los porcentajes en `transform` se refieren al **tamaño propio del elemento**, no al containing block — sidestep total.
+
+```css
+.panel {
+  position: fixed;
+  top: 0;
+  bottom: auto;
+  transform: translateY(calc(100dvh - 100%));   /* 100dvh = visual viewport */
+  /* ... */
+}
+
+.is-menu-hidden .panel {
+  /* + 8 px de slide hacia abajo para la animación de hide */
+  transform: translateY(calc(100dvh - 100% + 8px));
+}
+```
+
+Por qué `100dvh` y no `100vh`: `100dvh` (dynamic viewport height) excluye la URL bar de Safari iOS — el panel queda flush sobre la URL bar visible. Con `100vh` (que sigue al layout viewport) el panel quedaría parcialmente atrás de la URL bar cuando ésta está visible. `100dvh` se soporta desde Safari 15.4 (marzo 2022), seguro para nuestros targets.
+
+Por qué transforms explícitos en ambas reglas en vez de un CSS custom prop (`--panel-slide`): los custom props **no se interpolan en transitions** salvo que se registren con `@property`. Una regla `--panel-slide: 0px → 8px` haría snap, no fade. Repetir el `100dvh - 100%` en ambas reglas es feo pero necesario para que la `transition: transform 160ms` interpole bien.
+
+Cómo lo descubrimos: agregamos un debug HUD activable con `?debug=1` que carga una imagen sintética y pinta computed styles + rects en vivo. Probamos dos fixes alternativos como botones (FIX-A: `html { height: 100% }` runtime; FIX-B: `transform translateY` desde top:0). FIX-A no hizo nada (html ya estaba bien), FIX-B funcionó al primer intento → bug confirmado, fix permanente aplicado.
+
+Esa metodología (HUD live + botones de fix) ahorró horas de iteración a ciegas. Si volvés a debuggear bugs de iOS Safari mobile, agregalo de nuevo — el código está en el git history, filename pattern `?debug=1`.
+
+**8. Touch area de los sliders muy chica**
+
+Síntoma (no es bug, es UX miss): los sliders desktop usan track de 2 px y thumb de 10×10 px — perfecto para mouse, demasiado preciso para dedo. En mobile: difícil agarrar el thumb sin quedar pegado al borde, y al tirar del track entre dos thumbs muchas veces el tap se va a la fila de arriba/abajo en vez del slider.
+
+Fix (mobile only, desktop sin cambios):
+
+```css
+@media (hover: none) {
+  .panel input[type='range']                          { height: 6px; }
+  .panel input[type='range']::-webkit-slider-thumb    { width: 22px; height: 22px; }
+  .panel input[type='range']::-moz-range-thumb        { width: 22px; height: 22px; }
+  .panel .sl                                          { padding-block: 6px; }
+}
+```
+
+- Track de 2 → 6 px: el track ahora es tappable también, no sólo el thumb. Visualmente sigue siendo una línea fina.
+- Thumb de 10 → 22 px: ~2× el área. Apple HIG pide 44 × 44 px como min, pero combinado con los 6 px del track + el padding del row, el área efectiva en el eje principal supera los 28 px — suficiente para tap sin frustration. No subimos a 44 porque visualmente rompe la estética minimalista del editor.
+- Padding vertical de los rows: +6 px. Garantiza que un tap "casi en el thumb" pero ligeramente arriba/abajo siga llegando al slider correcto, no al de la fila vecina ni al gap.
+
+Desktop sigue intocado — pointer fino = targets chicos están bien.
+
+**9. Curves panel scroll + URL bar overlap**
+
+Dos issues reportados juntos después del fix #7:
+
+- **Curves con scroll vertical:** el canvas de curves es `aspect-ratio: 1/1` con `width: 100%` dentro de un panel de máx 320 px → ≈ 290 × 290 px. Sumado a las tabs de canal (≈ 30 px) y el hint (≈ 16 px) más gaps y padding ≈ 360 px. Con el cap global de `max-height: 50dvh` (≈ 330 px en iPhone 13 portrait), el canvas se clipea y el panel scrollea. Mala UX: el canvas ES la superficie de interacción — arrastrar un punto dentro de un scroll container pelea con el `touch-action`.
+- **URL bar de Safari tapando el último slider:** el panel anclado a `100dvh - 100%` queda flush contra el bottom del viewport dinámico. En teoría correcto, pero durante la transición de entrada/salida de la URL bar de Safari iOS hay un frame donde el bar se monta sobre el panel. Aun cuando el bar está totalmente colapsado, el panel "besa" la chrome — no respira.
+
+Fix:
+
+```css
+@media (hover: none) {
+  .panel {
+    /* +12 px de aire entre el panel y el bottom del dvh */
+    transform: translateY(calc(100dvh - 100% - 12px));
+    /* y el cap baja en sintonía para no crecer dentro del aire */
+    max-height: calc(50dvh - 12px);
+  }
+  .is-menu-hidden .panel {
+    /* base + 8 px de slide DOWN para hide → -12 + 8 = -4 */
+    transform: translateY(calc(100dvh - 100% - 4px));
+  }
+  /* excepción: curves crece hasta 85 dvh para que el canvas entre sin scroll */
+  .panel[data-panel='curves'] {
+    max-height: calc(85dvh - 12px);
+  }
+}
+```
+
+Por qué cada cosa:
+
+- `- 12px` en el transform: clearance contra la URL bar. 100dvh es teóricamente correcto pero Safari tiene una ventana de transición donde el bar se monta encima; 12 px elimina ese overlap y le da feel "asentado" al panel cuando el bar está colapsado.
+- `max-height: calc(50dvh - 12px)`: si dejábamos `50dvh` solo, un panel alto crecería hasta tocar el bottom del dvh — anulando el clearance del transform. La resta los mantiene en sintonía.
+- Excepción para curves con `85dvh`: alcanza para los ≈ 360 px de contenido en cualquier iPhone portrait, dejando aún espacio arriba para la zoom bar y abajo para la URL bar. No hacemos esto en adjust porque 9 sliders SÍ son un caso legítimo de scroll (lista de inputs independientes ≠ canvas draggable).
+- `- 4px` en hide: aritmética sobre el nuevo offset (`-12 + 8 = -4`). Repetimos el cálculo en lugar de usar una CSS custom prop porque las custom props bare no animan en `transition` salvo que estén registradas con `@property` — y registrarlas para una sola animación no vale la pena.
+
+Por qué no `100svh` (small viewport, asume URL bar visible) en lugar de `100dvh - 12px`: `svh` es estático — no crece cuando el bar se colapsa, así que el panel siempre quedaría 80-90 px arriba del bottom real cuando el usuario hace scroll y el bar desaparece. Feel raro: hueco grande sin contenido. `dvh` se ajusta dinámicamente; los 12 px de margen son constantes y absorben sólo la transición.
+
+Por qué no reducir el canvas de curves en lugar de agrandar el panel: el canvas es la herramienta principal de esa pestaña — más chico = menos precisión para arrastrar puntos. Mejor agrandar el contenedor (es la única excepción y queda confinada al `data-panel='curves'`).
+
+**10. Curve points "se sueltan" al moverlos un poco en mobile**
+
+Síntoma: el usuario toca un punto de la curva, lo arrastra unos pocos px, y el punto deja de seguir el dedo aunque el dedo siga presionado. UX no-iOS: en iOS estándar (Photos, Mail draft) cuando agarrás algo, queda agarrado hasta que levantás el dedo.
+
+Dos causas combinadas:
+
+1. **`touch-action` heredado de la panel.** `.panel { touch-action: pan-y }` (mobile) permite que el panel scrollee verticalmente con un swipe del dedo. Como el `#curve` no tenía `touch-action` propio, heredaba ese comportamiento. Resultado: en cuanto el dedo se movía verticalmente unos px, el gesture recognizer de iOS Safari decidía "este es un scroll del panel padre" y emitía `pointercancel` al canvas → la captura del punto se rompía silenciosamente. El `setPointerCapture` no protege contra esto: una vez que iOS reclasifica el gesto, el capture se libera. JS no recibía más `pointermove` y veía un `pointercancel` que no estaba escuchando.
+2. **`hitRadius` definido en unidades de curva (0–255), no display px.** 8 unidades en un canvas de ≈ 290 display px = ≈ 9 px de área tocable. Bien para mouse, ridículo para dedo (Apple HIG ≈ 44 px ideal).
+
+Fix:
+
+```css
+#curve {
+  /* el canvas reclama TODOS los gestos en su área */
+  touch-action: none;
+}
+```
+
+```ts
+const isCoarse = matchMedia('(hover: none) and (pointer: coarse)').matches;
+const hitRadiusPx = isCoarse ? 22 : 10;  // display px, no curve units
+
+function findHit(e, pts) {
+  const r = canvas.getBoundingClientRect();
+  const sx = r.width / 255, sy = r.height / 255;
+  const px = e.clientX - r.left, py = e.clientY - r.top;
+  const t2 = hitRadiusPx * hitRadiusPx;
+  for (let i = pts.length - 1; i >= 0; i--) {
+    const dx = pts[i].x * sx - px;
+    const dy = (255 - pts[i].y) * sy - py;
+    if (dx * dx + dy * dy <= t2) return i;
+  }
+  return -1;
+}
+
+canvas.addEventListener('pointercancel', endDrag);  // defensa adicional
+```
+
+Por qué cada decisión:
+
+- **`touch-action: none` en `#curve` (no `pan-y` heredado):** el canvas es interaction-only, no tiene contenido scrollable propio. Bloquear pan/zoom acá no le quita nada al usuario y le da a JS control total del gesto. Esto es lo que produce el "stuck to my finger" feel — iOS literalmente no puede robar el pointer mid-drag.
+- **Hit radius en display px, no curve units:** la unidad de curva varía con el ancho display del canvas (en mobile ≈ 1.14 px/unit, en desktop podría ser distinto si la panel tiene otro ancho). Medir en display px hace que la sensación táctil sea consistente independiente del viewport. Iteración last-to-first del array de puntos: si dos puntos quedan apilados, gana el que se dibujó arriba (más reciente) — coherente con el orden visual.
+- **22 px en coarse, 10 px en fine:** 22 px ≈ medio camino entre el cuadrado visible del punto (6 px) y el ideal HIG (44 px). Suficientemente grande para agarrar sin mirar fino, suficientemente chico para que dos puntos cercanos en X se puedan separar (los puntos están constrainted a ≥ 1 unit de separación en X = ~1.1 display px, y en la práctica el usuario los pone más lejos). En desktop con mouse, 10 px = ~9 unit-radius, ligeramente más generoso que el viejo 8 — feel idéntico.
+- **`pointercancel` listener:** belt-and-suspenders. Con `touch-action: none` no debería disparar por gesture-stealing, pero iOS lo emite también en otros escenarios (multi-touch escalation, system gesture, llamada entrante). No manejarlo dejaba el `dragging` flag colgado: el siguiente `pointerdown` arrastraba el punto viejo en vez de seleccionar uno nuevo.
+- **`hasPointerCapture?.` antes de `releasePointerCapture`:** evita warnings/throws si la captura ya fue liberada por el sistema (ej. justo después de `pointercancel`).
+
+Por qué no `Math.abs(dx) < r && Math.abs(dy) < r` (cuadrado) como antes: visualmente el área tocable es un cuadrado, pero perceptualmente el dedo agarra "lo que está cerca", no "lo que cae en mi rectángulo". Distancia euclidiana (círculo) se siente más predecible cuando hay puntos diagonales.
+
 ## Roadmap restante
 
 - **F. Bottom sheet con snap points** — el `.panel` actual es estático con `max-height: 50vh`. F sería convertirlo en un drawer drag-to-snap (collapsed / mid / full). Cambio mayor — requiere agregar pointer handlers al `.panel` que coexistan con pan/pinch en el canvas y el scroll vertical interno del propio panel. Considerar sólo si el feedback pide más control.

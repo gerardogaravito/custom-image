@@ -344,6 +344,15 @@ input[type='range']::-moz-range-thumb {
   height: 100%;
   display: block;
   cursor: crosshair;
+  /* The canvas owns ALL gestures inside its bounds. The parent `.panel`
+     uses `touch-action: pan-y` (mobile) so its sliders/text can scroll
+     vertically — but that propagates here and would cause iOS to steal
+     the curve drag the moment the finger moves a few pixels vertically
+     (Safari interprets it as "scroll the parent" → fires pointercancel
+     → grabbed point silently released). `none` pins the gesture to JS
+     pointer events. The curves canvas is interaction-only (no scrollable
+     content), so blocking pan/zoom here costs nothing. */
+  touch-action: none;
 }
 
 .hint {
@@ -829,6 +838,33 @@ select {
     overflow: visible;
   }
 
+  /* Touch-friendly slider rows. The desktop sizes (2 px track, 10 px square
+     thumb, no row padding) are too precise for finger taps — a slight miss
+     drags the wrong slider or scrolls the panel. Mobile bumps:
+       • Track height: 2 → 6 px so the line itself is tappable, not just the
+         thumb. Visually still slim.
+       • Thumb: 10 → 22 px square. Closer to Apple HIG min (44 px is the
+         official tap target, but 22 px on a track that itself is tappable
+         gives ~28 px effective hit area in the row direction).
+       • Vertical row padding: +6 px so taps near a row's edge still land on
+         the right slider, not the gap. Matches the increased thumb height
+         so the slider stays visually centered in the row.
+     Desktop is unchanged — finer pointer = smaller targets are fine. */
+  .panel input[type='range'] {
+    height: 6px;
+  }
+  .panel input[type='range']::-webkit-slider-thumb {
+    width: 22px;
+    height: 22px;
+  }
+  .panel input[type='range']::-moz-range-thumb {
+    width: 22px;
+    height: 22px;
+  }
+  .panel .sl {
+    padding-block: 6px;
+  }
+
   /* Width model: clamp to the desktop fixed width (320 px) so the chrome
      never grows wider than the controls actually need; on phones narrower
      than that, fill the screen so we don't waste edge real estate.
@@ -865,8 +901,10 @@ select {
     /* GPU layer for smoother slide transition on mobile, mirrors the same
        hint on .panel below. */
     will-change: opacity, transform;
-    transition: opacity 160ms ease, transform 160ms ease,
-                visibility 0s linear 0s;
+    transition:
+      opacity 160ms ease,
+      transform 160ms ease,
+      visibility 0s linear 0s;
     /* Block iOS pinch + double-tap zoom on the chrome. Without this, a
        pinch landing on the bar (which lives outside #viewport) triggers the
        browser's page zoom, which on iPhone scales the position:fixed UI to
@@ -878,9 +916,42 @@ select {
   .panel {
     /* Active tab content as a bottom sheet anchored to the bottom edge.
        Inactive panels still have `hidden` attr → display:none.
-       Same centering model as the bar (margin-inline auto, no transform). */
+       Same centering model as the bar (margin-inline auto, no transform on X). */
     position: fixed;
-    bottom: 0;
+    /* iOS Safari bug workaround (verified iPhone Safari 17, April 2026):
+       `position: fixed; bottom: 0` is calculated against a 0-height
+       containing block instead of the viewport. The result is the panel
+       rendering ABOVE the viewport at top=-height (formula:
+       top + height + bottom = containingHeight → -370.5 + 370.5 + 0 = 0).
+       This happens despite html/body resolving to the full viewport
+       (verified via runtime HUD: html.client = 393x659, body.client = 393x659).
+       The trigger seems to be `<section id="tools">` collapsing to 0 height
+       (all its children are position:fixed → no in-flow content), and Safari
+       picking THAT as the CB instead of the viewport — a spec violation.
+       `.tools__bar` (sibling, also fixed) is unaffected because it uses
+       `top: Npx`: `top` is measured from y=0 which is the same whether the
+       CB height is 0 or 741. Only `bottom` exposes the bug.
+
+       Fix: anchor at the bottom via `transform: translateY(...)` from
+       `top: 0`. Transform percentages refer to the element's OWN size,
+       which sidesteps the CB calculation entirely. We use 100dvh (dynamic
+       viewport height, excludes URL bar) so the panel sits flush above
+       the URL bar on iOS Safari instead of getting clipped behind it.
+
+       `.is-menu-hidden .panel` overrides this transform to add an 8 px
+       slide-down for the hide animation. Using explicit transforms (not a
+       CSS custom prop) so the transition interpolates — bare custom props
+       only animate when registered via `@property`. See mobile-ux.md § 7
+       postmortem #7.
+
+       The `- 12px` is breathing room from Safari iOS's bottom URL bar.
+       100dvh excludes the URL bar in theory, but during the bar's enter/
+       exit transition there's a window where it overlaps the panel.
+       12 px clearance hides that overlap and gives a more "settled" feel
+       even when the bar is fully collapsed (panel doesn't kiss the chrome). */
+    top: 0;
+    bottom: auto;
+    transform: translateY(calc(100dvh - 100% - 12px));
     left: 0;
     right: 0;
     max-width: 320px;
@@ -893,7 +964,11 @@ select {
     flex-direction: column;
     gap: 10px;
     z-index: 11;
-    max-height: 50vh;
+    /* Subtract the same 12 px breathing room used in the transform anchor so
+       the panel can never grow into the URL-bar zone. Without this, a tall
+       panel would max out at 50 dvh and its bottom edge would land at the
+       URL bar (defeating the clearance). */
+    max-height: calc(50dvh - 12px);
     overflow-y: auto;
     padding-bottom: max(14px, env(safe-area-inset-bottom, 14px));
     /* Solid (~94 % opaque) background — NO `backdrop-filter`. This used to be
@@ -910,22 +985,48 @@ select {
        bottom over the image edge, not the focal area. See mobile-ux.md § 7
        postmortem #6. */
     background: rgba(13, 13, 13, 0.96);
-    border-top: 1px solid var(--line);
-    border-left: 1px solid var(--line);
-    border-right: 1px solid var(--line);
+    /* Close the box on all 4 sides + soften the corners. The panel now
+       floats 12 px above the URL bar (see transform comment above), so
+       it reads as a card, not a sheet glued to the chrome. Without the
+       bottom border + radius the panel looked "unfinished" — top border
+       visible, side borders running into a hard cropped bottom, last
+       button kissing the edge. shadow + radius give it a settled feel
+       without competing visually with the canvas. */
+    border: 1px solid var(--line);
+    box-shadow: 0 8px 24px rgba(0, 0, 0, 0.45);
     visibility: visible;
     /* Promote to its own GPU layer so the slide transition runs on the
        compositor (smoother on low-end Android) and — more importantly — so
        the panel has a guaranteed backing store to paint into, independent
        of the canvas behind it. */
     will-change: opacity, transform;
-    transition: opacity 160ms ease, transform 160ms ease,
-                visibility 0s linear 0s;
+    transition:
+      opacity 160ms ease,
+      transform 160ms ease,
+      visibility 0s linear 0s;
     /* Allow vertical scroll within the panel (9 sliders in adjustments
        can overflow on small phones in landscape) but block pinch +
        double-tap zoom that would scale the chrome. Sliders work via the
        <input type="range"> own pointer logic — independent of touch-action. */
     touch-action: pan-y;
+  }
+
+  /* Curves panel exception — no internal scroll.
+
+     The curves UI is a single 1:1 canvas (≈ 290 px on a 320 px-wide panel)
+     plus channel tabs and a hint line, totalling ≈ 360 px. With the global
+     50 dvh cap (≈ 330 px on an iPhone 13) the canvas would clip and
+     overflow into a scroll container — annoying because the canvas is the
+     interaction surface (dragging a curve point inside a scrolling parent
+     fights the touch-action). Letting it grow to 85 dvh keeps the canvas
+     fully visible on every phone in portrait while still leaving room for
+     the zoom bar above and the URL bar below.
+
+     Adjustments deliberately keeps the smaller cap because 9 sliders
+     legitimately need scroll on short viewports — that's an OK pattern
+     for a list of independent inputs, unlike a draggable canvas. */
+  .panel[data-panel='curves'] {
+    max-height: calc(85dvh - 12px);
   }
 
   /* Hidden state: fade out + small slide away from the canvas, then flip
@@ -938,16 +1039,25 @@ select {
     pointer-events: none;
     visibility: hidden;
     transform: translateY(-8px);
-    transition: opacity 160ms ease, transform 160ms ease,
-                visibility 0s linear 160ms;
+    transition:
+      opacity 160ms ease,
+      transform 160ms ease,
+      visibility 0s linear 160ms;
   }
   .is-menu-hidden .panel {
     opacity: 0;
     pointer-events: none;
     visibility: hidden;
-    transform: translateY(8px);
-    transition: opacity 160ms ease, transform 160ms ease,
-                visibility 0s linear 160ms;
+    /* Same bottom-anchor as `.panel` (`100dvh - 100% - 12px`) + 8 px slide
+       DOWN for the hide animation → `100dvh - 100% - 4px`. Has to repeat
+       the math because transitioning on a CSS custom prop requires
+       `@property` registration; an explicit transform value here keeps
+       the interpolation working out of the box. */
+    transform: translateY(calc(100dvh - 100% - 4px));
+    transition:
+      opacity 160ms ease,
+      transform 160ms ease,
+      visibility 0s linear 160ms;
   }
 
   .zoom {

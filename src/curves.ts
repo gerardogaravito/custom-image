@@ -135,21 +135,54 @@ export function mountCurves(canvas: HTMLCanvasElement, onChange: () => void): Cu
   }
 
   let dragging: number | null = null;
-  const hitRadius = 8;
+
+  // Hit radius adapts to pointer type. We measure in DISPLAY pixels (not
+  // 0–255 curve units) because the canvas is rendered at variable CSS size
+  // depending on viewport — a fixed unit-radius would feel chunky on a
+  // wide desktop canvas and microscopic on a phone. ~22 px on coarse
+  // pointers (finger) sits between Apple HIG's 44 px ideal and the visual
+  // size of the 6 px point square — large enough to grab without looking,
+  // small enough that adjacent points don't collide. ~10 px on fine
+  // pointers (mouse/pen) keeps desktop precision.
+  const isCoarse = typeof matchMedia !== 'undefined' &&
+    matchMedia('(hover: none) and (pointer: coarse)').matches;
+  const hitRadiusPx = isCoarse ? 22 : 10;
+
+  function findHit(e: PointerEvent, pts: Point[]): number {
+    const r = canvas.getBoundingClientRect();
+    if (r.width === 0 || r.height === 0) return -1;
+    const sx = r.width / 255;
+    const sy = r.height / 255;
+    const px = e.clientX - r.left;
+    const py = e.clientY - r.top;
+    const t2 = hitRadiusPx * hitRadiusPx;
+    // iterate last-to-first so points stacked on top (drawn last) win the hit
+    for (let i = pts.length - 1; i >= 0; i--) {
+      const dx = pts[i].x * sx - px;
+      const dy = (255 - pts[i].y) * sy - py;
+      if (dx * dx + dy * dy <= t2) return i;
+    }
+    return -1;
+  }
 
   canvas.addEventListener('pointerdown', (e) => {
-    const p = toLocal(e);
     const pts = state[active];
-    const idx = pts.findIndex((q) => Math.abs(q.x - p.x) < hitRadius && Math.abs(q.y - p.y) < hitRadius);
+    const idx = findHit(e, pts);
     if (idx >= 0) {
       dragging = idx;
     } else {
+      const p = toLocal(e);
       pts.push(p);
       pts.sort((a, b) => a.x - b.x);
       dragging = pts.findIndex((q) => q.x === p.x && q.y === p.y);
       onChange();
       draw();
     }
+    // Capture so subsequent move/up events keep targeting the canvas even
+    // if the finger drifts outside its bounds. Combined with #curve's
+    // `touch-action: none` (style.css) this is what gives the iOS-native
+    // "stuck to my finger" feel — the OS can't steal the gesture for a
+    // parent scroll mid-drag.
     canvas.setPointerCapture(e.pointerId);
   });
 
@@ -171,15 +204,23 @@ export function mountCurves(canvas: HTMLCanvasElement, onChange: () => void): Cu
     draw();
   });
 
-  canvas.addEventListener('pointerup', (e) => {
+  function endDrag(e: PointerEvent) {
     dragging = null;
-    canvas.releasePointerCapture(e.pointerId);
-  });
+    if (canvas.hasPointerCapture?.(e.pointerId)) {
+      canvas.releasePointerCapture(e.pointerId);
+    }
+  }
+  canvas.addEventListener('pointerup', endDrag);
+  // Defensive: if iOS ever decides to cancel the pointer (e.g. system
+  // gesture, incoming call, multi-touch escalation), clear state cleanly
+  // so the next pointerdown isn't haunted by a stale `dragging` index.
+  // With `touch-action: none` on the canvas this should rarely fire, but
+  // not handling it would leave the curve in a half-grabbed state.
+  canvas.addEventListener('pointercancel', endDrag);
 
   canvas.addEventListener('dblclick', (e) => {
-    const p = toLocal(e as unknown as PointerEvent);
     const pts = state[active];
-    const idx = pts.findIndex((q) => Math.abs(q.x - p.x) < hitRadius && Math.abs(q.y - p.y) < hitRadius);
+    const idx = findHit(e as unknown as PointerEvent, pts);
     if (idx > 0 && idx < pts.length - 1) {
       pts.splice(idx, 1);
       onChange();
