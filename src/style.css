@@ -656,3 +656,35 @@ select {
     -webkit-backdrop-filter: blur(16px) saturate(140%);
   }
 }
+
+/* ----- mobile UX: immersion + tweak states -------------------------------
+ * Two opacity-driven modes for getting the chrome out of the way:
+ *
+ *  • `.is-immersed` (set on <body> via single tap on canvas) — fades all
+ *    chrome to 10% so the user can see the photo unobstructed for a few
+ *    seconds. Pointer events disabled while immersed so taps go to the
+ *    canvas (and a second tap restores).
+ *  • `.is-tweaking` (set on <body> while a slider/curve is being dragged) —
+ *    fades only the tools panel to 50% so the user sees the live preview
+ *    behind it without losing the slider thumb. Mobile only — desktop has
+ *    the panel at the corner where it doesn't overlap the image.
+ */
+.tools,
+.zoom,
+.ab-hint {
+  transition: opacity 200ms ease;
+}
+.is-immersed .tools,
+.is-immersed .zoom,
+.is-immersed .ab-hint {
+  opacity: 0.1;
+  pointer-events: none;
+}
+@media (hover: none) {
+  .tools {
+    transition: opacity 100ms ease;
+  }
+  .is-tweaking .tools {
+    opacity: 0.5;
+  }
+}

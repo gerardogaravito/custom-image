@@ -23,7 +23,7 @@ import {
 } from './crop';
 import { History } from './undo';
 import { type Session, clearSession, loadSession, saveSession } from './persist';
-import { HINTS } from './config';
+import { HINTS, MOBILE_UX } from './config';
 import type { Adjust, Curves, State, Channel } from './types';
 import { defaultAdjust } from './types';
 
@@ -79,12 +79,18 @@ function flagInteraction() {
   // Snapshot once at the START of each interaction burst (slider drag, curve
   // edit, dblclick reset). Within a burst (continuous input), no extra
   // snapshots — otherwise a single drag would push hundreds.
-  if (!isInteracting) pushUndo();
+  if (!isInteracting) {
+    pushUndo();
+    // Mobile-only: fade the tools panel so the user can see the live preview
+    // behind it while dragging. CSS handles the actual opacity.
+    document.body.classList.add('is-tweaking');
+  }
   isInteracting = true;
   schedule();
   clearTimeout(interactionEndTimer);
   interactionEndTimer = window.setTimeout(() => {
     isInteracting = false;
+    document.body.classList.remove('is-tweaking');
     schedule();
     scheduleSave();  // burst ended → persist
   }, INTERACTION_RELEASE_MS);
@@ -353,7 +359,8 @@ window.addEventListener('resize', () => {
 });
 
 // ----------------------------------------------------------------------------
-// Pan (hold + drag the canvas to scroll the viewport)
+// Canvas gestures: pan (1 finger / mouse drag), pinch (2 fingers — zoom + pan
+// together), and tap-to-immerse (single touch tap, no drag, hides chrome).
 // ----------------------------------------------------------------------------
 
 function updatePannableState() {
@@ -363,38 +370,173 @@ function updatePannableState() {
   view.classList.toggle('is-pannable', pannable && !cropActive);
 }
 
+// --- shared pointer tracking ---
+const activePointers = new Map<number, { x: number; y: number }>();
+
+// --- single-finger pan state ---
 type PanState = { startX: number; startY: number; scrollX: number; scrollY: number };
 let pan: PanState | null = null;
+
+// --- pinch (two-finger zoom + pan) state ---
+type PinchState = {
+  startDistance: number;
+  startCenter: { x: number; y: number };
+  startZoom: number;
+  startScrollLeft: number;
+  startScrollTop: number;
+  viewportRect: DOMRect; // captured once, viewport doesn't move during a gesture
+};
+let pinch: PinchState | null = null;
+
+// --- tap-to-immerse state ---
+type TapCandidate = { x: number; y: number; t: number; pointerId: number; pointerType: string };
+let tapCandidate: TapCandidate | null = null;
+let multiTouchInGesture = false;
+
+function pinchCenterAndDistance(): { center: { x: number; y: number }; distance: number } | null {
+  if (activePointers.size < 2) return null;
+  const [a, b] = [...activePointers.values()];
+  return {
+    center: { x: (a.x + b.x) / 2, y: (a.y + b.y) / 2 },
+    distance: Math.hypot(b.x - a.x, b.y - a.y),
+  };
+}
 
 view.addEventListener('pointerdown', (e) => {
   // Crop mode owns pointer events on the canvas via its overlay
   if (cropActive) return;
-  if (e.button !== 0) return;
-  const overflowsX = viewport.scrollWidth > viewport.clientWidth;
-  const overflowsY = viewport.scrollHeight > viewport.clientHeight;
-  if (!overflowsX && !overflowsY) return;
-  pan = {
-    startX: e.clientX,
-    startY: e.clientY,
-    scrollX: viewport.scrollLeft,
-    scrollY: viewport.scrollTop,
-  };
-  view.classList.add('is-panning');
-  view.setPointerCapture(e.pointerId);
-  e.preventDefault();
+
+  activePointers.set(e.pointerId, { x: e.clientX, y: e.clientY });
+
+  // Two pointers down → switch to pinch mode, cancel any single-finger gesture
+  if (activePointers.size === 2) {
+    multiTouchInGesture = true;
+    tapCandidate = null;
+    if (pan) {
+      pan = null;
+      view.classList.remove('is-panning');
+    }
+    const cd = pinchCenterAndDistance()!;
+    pinch = {
+      startDistance: cd.distance,
+      startCenter: cd.center,
+      startZoom: effectiveZoom(),
+      startScrollLeft: viewport.scrollLeft,
+      startScrollTop: viewport.scrollTop,
+      viewportRect: viewport.getBoundingClientRect(),
+    };
+    e.preventDefault();
+    return;
+  }
+
+  // First pointer down — could become a tap, a pan, or part of a pinch
+  if (activePointers.size === 1) {
+    multiTouchInGesture = false;
+    if (e.pointerType !== 'mouse') {
+      // Touch / pen: candidate for tap-to-immerse (mouse uses click handlers
+      // elsewhere — would conflict with normal clicks)
+      tapCandidate = {
+        x: e.clientX,
+        y: e.clientY,
+        t: Date.now(),
+        pointerId: e.pointerId,
+        pointerType: e.pointerType,
+      };
+    }
+    if (e.button !== 0) return;
+    const overflowsX = viewport.scrollWidth > viewport.clientWidth;
+    const overflowsY = viewport.scrollHeight > viewport.clientHeight;
+    if (overflowsX || overflowsY) {
+      pan = {
+        startX: e.clientX,
+        startY: e.clientY,
+        scrollX: viewport.scrollLeft,
+        scrollY: viewport.scrollTop,
+      };
+      view.classList.add('is-panning');
+      view.setPointerCapture(e.pointerId);
+    }
+    e.preventDefault();
+  }
 });
 
 window.addEventListener('pointermove', (e) => {
-  if (!pan) return;
-  viewport.scrollLeft = pan.scrollX - (e.clientX - pan.startX);
-  viewport.scrollTop = pan.scrollY - (e.clientY - pan.startY);
+  if (!activePointers.has(e.pointerId)) return;
+  activePointers.set(e.pointerId, { x: e.clientX, y: e.clientY });
+
+  // Disqualify tap candidate as soon as the pointer moves more than threshold
+  if (tapCandidate && tapCandidate.pointerId === e.pointerId) {
+    const dx = e.clientX - tapCandidate.x;
+    const dy = e.clientY - tapCandidate.y;
+    if (Math.hypot(dx, dy) > MOBILE_UX.tapMaxPx) tapCandidate = null;
+  }
+
+  if (pinch && activePointers.size >= 2) {
+    const cd = pinchCenterAndDistance()!;
+    // Combined zoom + pan in one math step. Derivation in mobile-ux.md skill doc.
+    const ratio = cd.distance / pinch.startDistance;
+    const newZoom = Math.max(ZOOM_MIN, Math.min(ZOOM_MAX, pinch.startZoom * ratio));
+    const effectiveRatio = newZoom / pinch.startZoom; // accounts for clamping
+    setZoom(newZoom); // set canvas dims; we'll handle scroll ourselves below
+    const vr = pinch.viewportRect;
+    viewport.scrollLeft =
+      effectiveRatio * (pinch.startCenter.x + pinch.startScrollLeft - vr.left)
+      - cd.center.x + vr.left;
+    viewport.scrollTop =
+      effectiveRatio * (pinch.startCenter.y + pinch.startScrollTop - vr.top)
+      - cd.center.y + vr.top;
+    e.preventDefault();
+    return;
+  }
+
+  if (pan) {
+    viewport.scrollLeft = pan.scrollX - (e.clientX - pan.startX);
+    viewport.scrollTop = pan.scrollY - (e.clientY - pan.startY);
+  }
 });
 
-window.addEventListener('pointerup', () => {
-  if (!pan) return;
-  pan = null;
-  view.classList.remove('is-panning');
+window.addEventListener('pointerup', (e) => {
+  const wasTracked = activePointers.has(e.pointerId);
+  activePointers.delete(e.pointerId);
+
+  if (pinch && activePointers.size < 2) pinch = null;
+
+  if (pan && activePointers.size === 0) {
+    pan = null;
+    view.classList.remove('is-panning');
+  }
+
+  // Tap completion: same pointer, no movement, short duration, no multi-touch
+  // happened during the gesture, and pointer was touch/pen (not mouse).
+  if (
+    wasTracked
+    && tapCandidate
+    && tapCandidate.pointerId === e.pointerId
+    && !multiTouchInGesture
+    && Date.now() - tapCandidate.t < MOBILE_UX.tapMaxMs
+  ) {
+    toggleImmersed();
+  }
+  tapCandidate = null;
+
+  if (activePointers.size === 0) multiTouchInGesture = false;
 });
+
+// --- tap-to-immerse: hide all chrome temporarily so the user sees the photo ---
+let immersed = false;
+let immersionTimer = 0;
+
+function toggleImmersed() {
+  immersed = !immersed;
+  document.body.classList.toggle('is-immersed', immersed);
+  clearTimeout(immersionTimer);
+  if (immersed) {
+    immersionTimer = window.setTimeout(() => {
+      immersed = false;
+      document.body.classList.remove('is-immersed');
+    }, MOBILE_UX.immersionDurationSeconds * 1000);
+  }
+}
 
 $<HTMLButtonElement>('#zoom-in').addEventListener('click', () => zoomBy(ZOOM_STEP));
 $<HTMLButtonElement>('#zoom-out').addEventListener('click', () => zoomBy(1 / ZOOM_STEP));

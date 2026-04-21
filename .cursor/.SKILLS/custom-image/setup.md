@@ -35,7 +35,7 @@ src/persist.ts         # IndexedDB session save/load/clear
 src/main.ts            # upload, preview/export rAF loop, UI wiring, undo/redo, zoom, analytics, persist
 ```
 
-Feature-specific docs live alongside this one: `zoom.md`, `recortar.md`, `rendering.md`, `herramientas.md`, `undo.md`, `persist.md`, `seo.md`, `tests.md`.
+Feature-specific docs live alongside this one: `zoom.md`, `recortar.md`, `rendering.md`, `herramientas.md`, `undo.md`, `persist.md`, `mobile-ux.md`, `seo.md`, `tests.md`.
 
 ## Key design decisions
 
