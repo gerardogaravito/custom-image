@@ -862,6 +862,9 @@ select {
        categorically gone (not just transparent) once the fade completes —
        prevents the "very transparent but didn't really hide" feel. */
     visibility: visible;
+    /* GPU layer for smoother slide transition on mobile, mirrors the same
+       hint on .panel below. */
+    will-change: opacity, transform;
     transition: opacity 160ms ease, transform 160ms ease,
                 visibility 0s linear 0s;
     /* Block iOS pinch + double-tap zoom on the chrome. Without this, a
@@ -873,8 +876,8 @@ select {
   }
 
   .panel {
-    /* Active tab content as a translucent bottom sheet anchored to the
-       bottom edge. Inactive panels still have `hidden` attr → display:none.
+    /* Active tab content as a bottom sheet anchored to the bottom edge.
+       Inactive panels still have `hidden` attr → display:none.
        Same centering model as the bar (margin-inline auto, no transform). */
     position: fixed;
     bottom: 0;
@@ -893,13 +896,29 @@ select {
     max-height: 50vh;
     overflow-y: auto;
     padding-bottom: max(14px, env(safe-area-inset-bottom, 14px));
-    background: rgba(17, 17, 17, 0.85);
-    backdrop-filter: blur(16px) saturate(140%);
-    -webkit-backdrop-filter: blur(16px) saturate(140%);
+    /* Solid (~94 % opaque) background — NO `backdrop-filter`. This used to be
+       `rgba(17, 17, 17, 0.85)` + `backdrop-filter: blur(16px) saturate(140%)`
+       same as the bar. The blur looked nice but combined with `overflow-y:
+       auto` (which makes the panel a scroll container with its own stacking
+       context) it triggered a Chromium / WebKit compositing bug where the
+       panel's subtree wouldn't paint until something forced a layout
+       invalidation (opening devtools, rotating the device, switching tabs
+       in the OS). Reproducible in Chrome devtools mobile emulator: panel
+       blank on load → toggle inspect → panel paints. The bar (no scroll
+       container, same blur) was unaffected. Solid bg sidesteps the bug
+       entirely; visual regression is minimal because the panel sits at the
+       bottom over the image edge, not the focal area. See mobile-ux.md § 7
+       postmortem #6. */
+    background: rgba(13, 13, 13, 0.96);
     border-top: 1px solid var(--line);
     border-left: 1px solid var(--line);
     border-right: 1px solid var(--line);
     visibility: visible;
+    /* Promote to its own GPU layer so the slide transition runs on the
+       compositor (smoother on low-end Android) and — more importantly — so
+       the panel has a guaranteed backing store to paint into, independent
+       of the canvas behind it. */
+    will-change: opacity, transform;
     transition: opacity 160ms ease, transform 160ms ease,
                 visibility 0s linear 0s;
     /* Allow vertical scroll within the panel (9 sliders in adjustments
@@ -932,9 +951,14 @@ select {
   }
 
   .zoom {
-    /* Zoom bar is always visible at the top — even when the menu is hidden
-       (default state on mobile). It's slim and gives constant feedback on
-       the current zoom %. */
+    /* Zoom bar lives at the top and stays visible at all times on mobile —
+       independent of the `is-menu-hidden` body class. It's the user's only
+       always-on indicator of current zoom % and the only entry point to
+       "menu" / "ocultar" (the toggle to show/hide the .tools chrome). The
+       fade rules for `.is-menu-hidden` deliberately target only `.tools__bar`
+       and `.panel` so the zoom bar is never affected by them. Don't add
+       `.is-menu-hidden .zoom { ... }` here — it would lock the user out of
+       reopening the menu once it's hidden. */
     bottom: auto;
     top: max(12px, env(safe-area-inset-top, 12px));
   }

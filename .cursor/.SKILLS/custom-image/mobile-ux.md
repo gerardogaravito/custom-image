@@ -372,7 +372,7 @@ Phase 1 tenía un timer (3 s) que volvía a mostrar el chrome. Phase 3 no — qu
 
 ### Postmortem — bugs detectados después del deploy inicial de Phase 3
 
-Cinco bugs salieron al testear en iPhone real. Fix en el mismo commit que el doc.
+Seis bugs salieron al testear en iPhone real. Fix en el mismo commit que el doc.
 
 **1. El menú no aparecía aunque cliquearas "menu"**
 
@@ -477,6 +477,30 @@ html { touch-action: manipulation; }   /* defensa global iOS doble-tap */
 Por qué `manipulation` en `<html>` y no en `<body>`: el efectivo `touch-action` se computa por intersección de ancestros. Poniéndolo en `<html>` cubre absolutamente todo el subtree, incluso elementos que se monten dinámicamente fuera de `<body>` (no es nuestro caso, pero es defensivo). `<body>` también funcionaría — la diferencia es semántica.
 
 Por qué `manipulation` y no `pan-y` en html: `pan-y` permite scroll vertical (lo cual ya tenemos `overflow: hidden` en body, así que sería contradictorio); `manipulation` permite tap + pan + pinch pero bloquea doble-tap-zoom — es el balance correcto. Pinch se sigue bloqueando vía `gesturestart/change/end` document-level (§ 6) y vía `touch-action: none` en cada elemento del chrome (§ 7 bug #3).
+
+**6. El panel no pintaba hasta abrir devtools (compositing bug)**
+
+Síntoma: en mobile, al mostrar el menú, el bar de tabs aparecía arriba pero el `.panel` con los sliders/botones no renderizaba abajo — la zona quedaba completamente vacía. La hipótesis inicial de bug #5 (compound transforms con `backdrop-filter`) no era el culpable: aún con `margin-inline: auto` (un solo transform reservado para el slide), el panel seguía sin pintar.
+
+Pista que lo destrabó: el panel **sí aparecía al togglear el inspect del devtools** (y al rotar el device, según testing posterior). Cualquier cosa que forzara un layout invalidation hacía que pintara. Eso es huella clásica de un bug de compositor — no un bug de layout.
+
+Causa: `.panel` tenía `backdrop-filter: blur(16px) saturate(140%)` **+** `overflow-y: auto`. La `overflow-y: auto` convierte al elemento en un scroll container, lo que crea un stacking context y un compositor layer separado. Combinado con `backdrop-filter`, dispara un edge case donde el subtree del panel no se pinta hasta el siguiente layout invalidation. El `.tools__bar` (mismo `backdrop-filter`, sin `overflow`) renderiza bien — confirma que es la combinación, no el filter solo.
+
+Fix: drop `backdrop-filter` del `.panel`. Background sólido de `rgba(13, 13, 13, 0.96)` (~94 % opaco) — visualmente casi indistinguible del blur cuando está sobre el borde inferior de la imagen, donde casi no hay contenido focal. El bar conserva su `backdrop-filter` (no tiene scroll, no dispara el bug).
+
+Defensa adicional: `will-change: opacity, transform` en ambos (.tools__bar y .panel). Promueve a su propio GPU layer con backing store dedicado — el panel ya no depende de que el compositor "decida" pintarlo cuando hay layout activity.
+
+```css
+.panel {
+  background: rgba(13, 13, 13, 0.96);   /* solid, no blur */
+  will-change: opacity, transform;       /* GPU layer guarantee */
+  /* SIN backdrop-filter / -webkit-backdrop-filter */
+}
+```
+
+Por qué no probamos primero quitar `overflow-y: auto`: porque el panel de ajustes tiene 9 sliders + divider + 2 sliders de ruido — en landscape iPhone (414 × 736 → 50vh = 368px) puede desbordar. Sin scroll, los sliders de abajo quedan inaccesibles. El blur era nice-to-have; el scroll es funcionalidad core.
+
+Side note: el `will-change` también suaviza la animación de fade en Android low-end, así que pago el cost de un GPU layer extra a cambio de un fix robusto + mejor perf de animación.
 
 ## Roadmap restante
 
