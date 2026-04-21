@@ -932,12 +932,50 @@ function nextDownloadName(base: string, ext: string): string {
   return `${base}_${String(next).padStart(2, '0')}.${ext}`;
 }
 
-// On touch devices, prefer Web Share API so the image hits the iOS/Android
-// share sheet — where "Guardar imagen" puts it in the Photos camera roll.
-// `<a download>` alone only saves to Downloads/Files, not Photos.
-async function saveImage(blob: Blob, filename: string): Promise<'shared' | 'downloaded' | 'cancelled'> {
-  const isTouch = matchMedia('(hover: none)').matches;
-  if (isTouch && typeof navigator !== 'undefined' && 'canShare' in navigator) {
+// Platform detection — split iOS vs Android so we can take the right path.
+// iOS: Web Share is the right tool (system "Guardar imagen" → Photos roll).
+// Android: Web Share dumps you on a list of installed apps with NO native
+// "save to Gallery" option, so we prefer File System Access API (when
+// available) which lets the user pick `Pictures/` — the only way to land
+// in Google Photos. Fallback: `<a download>` to `Downloads/` + a clear toast
+// telling the user what just happened.
+// Optional override via `?platform=ios|android|desktop` to force a specific
+// branch from any device — useful for testing the Android save path from a
+// Chromium desktop without an actual Android handset. Same precedent as the
+// `?debug=1` HUD documented in mobile-ux.md postmortem #7.
+const platformOverride = (() => {
+  if (typeof window === 'undefined') return null;
+  const v = new URLSearchParams(window.location.search).get('platform');
+  return v === 'ios' || v === 'android' || v === 'desktop' ? v : null;
+})();
+const isIOSDevice = (() => {
+  if (platformOverride) return platformOverride === 'ios';
+  if (typeof navigator === 'undefined') return false;
+  const ua = navigator.userAgent;
+  if (/iPad|iPhone|iPod/.test(ua)) return true;
+  return navigator.platform === 'MacIntel' && navigator.maxTouchPoints > 1;
+})();
+const isAndroidDevice = (() => {
+  if (platformOverride) return platformOverride === 'android';
+  return typeof navigator !== 'undefined' && /Android/.test(navigator.userAgent);
+})();
+
+// Minimal typings for File System Access API (not in lib.dom yet).
+type FSAWritable = { write(data: Blob): Promise<void>; close(): Promise<void> };
+type FSAFileHandle = { createWritable(): Promise<FSAWritable> };
+type FSASaveOptions = {
+  suggestedName?: string;
+  startIn?: 'desktop' | 'documents' | 'downloads' | 'music' | 'pictures' | 'videos';
+  types?: { description?: string; accept: Record<string, string[]> }[];
+};
+type WindowWithFSA = Window & {
+  showSaveFilePicker?: (options?: FSASaveOptions) => Promise<FSAFileHandle>;
+};
+
+export type SaveResult = 'shared' | 'saved' | 'downloaded' | 'cancelled';
+
+async function saveImage(blob: Blob, filename: string): Promise<SaveResult> {
+  if (isIOSDevice && typeof navigator !== 'undefined' && 'canShare' in navigator) {
     const file = new File([blob], filename, { type: blob.type });
     if (navigator.canShare({ files: [file] })) {
       try {
@@ -949,6 +987,28 @@ async function saveImage(blob: Blob, filename: string): Promise<'shared' | 'down
       }
     }
   }
+
+  if (isAndroidDevice) {
+    const w = window as WindowWithFSA;
+    if (typeof w.showSaveFilePicker === 'function') {
+      const ext = filename.includes('.') ? filename.slice(filename.lastIndexOf('.') + 1) : 'jpg';
+      try {
+        const handle = await w.showSaveFilePicker({
+          suggestedName: filename,
+          startIn: 'pictures',
+          types: [{ description: 'Imagen', accept: { [blob.type]: [`.${ext}`] } }],
+        });
+        const writable = await handle.createWritable();
+        await writable.write(blob);
+        await writable.close();
+        return 'saved';
+      } catch (err) {
+        if (err instanceof Error && err.name === 'AbortError') return 'cancelled';
+        // SecurityError, NotAllowedError, etc. → fall through to download
+      }
+    }
+  }
+
   const url = URL.createObjectURL(blob);
   const a = document.createElement('a');
   a.href = url;
@@ -989,9 +1049,18 @@ download.addEventListener('click', async () => {
     const blob = await out.toBlob(type, quality);
     const filename = nextDownloadName(sourceName, fmt.value === 'png' ? 'png' : 'jpg');
     const result = await saveImage(blob, filename);
-    if (result === 'shared') toast('imagen guardada', { kind: 'success' });
-    else if (result === 'downloaded') toast('descarga lista', { kind: 'success' });
-    // 'cancelled' (user closed the share sheet) → no toast
+    if (result === 'shared' || result === 'saved') toast('imagen guardada', { kind: 'success' });
+    else if (result === 'downloaded') {
+      if (isAndroidDevice) {
+        toast('guardada en Descargas — moverla a Pictures para verla en Fotos', {
+          kind: 'success',
+          durationMs: 6000,
+        });
+      } else {
+        toast('descarga lista', { kind: 'success' });
+      }
+    }
+    // 'cancelled' (user closed the share sheet or save picker) → no toast
   } catch (err) {
     console.error('[download]', err);
     const msg = err instanceof Error ? err.message : 'Error al exportar.';

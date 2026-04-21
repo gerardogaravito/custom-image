@@ -129,19 +129,72 @@ Helper `makeCanvas(w, h)` decide entre `OffscreenCanvas` (preferido) y `HTMLCanv
 
 El counter no se resetea al cargar una imagen nueva: si subís otra foto distinta, su `sourceName` no estará en el Map y arranca en `_01`. Si recargás la misma imagen en la misma sesión, continúa donde estaba.
 
-### Destino del archivo: Photos (mobile) vs Downloads (desktop)
+### Destino del archivo: Photos (iOS) / Pictures (Android) / Downloads (desktop)
 
-`saveImage(blob, filename)` routea según el dispositivo:
+`saveImage(blob, filename)` routea por **plataforma**, no solo por touch. iOS y Android tienen capacidades muy distintas para este flujo y meterlos en la misma rama (como hacíamos antes) genera el bug clásico de "el botón descargar no me guardó la foto en mi galería" en Android.
 
-- **Touch devices** (`matchMedia('(hover: none)')` + `navigator.canShare({ files })`): abre el **share sheet nativo** vía Web Share API. En iOS Safari el usuario ve "Guardar imagen" → va directo al carrete de Photos. En Android Chrome, "Save image" → Gallery. Esto es lo único que hace que el archivo termine en la app Fotos del iPhone — `<a download>` solo lo manda a la carpeta de Downloads/Files.
-- **Desktop o browsers sin Web Share**: `<a download>` tradicional → browser default (Downloads folder).
+Detección via UA + `maxTouchPoints` (`isIOSDevice`, `isAndroidDevice` declaradas top-level en `main.ts`). Sí, UA sniffing es feo, pero las APIs no nos dan otra forma de distinguir iOS Safari de Android Chrome cuando ambos son `(hover: none)`.
 
-Si el usuario cancela el share sheet, `navigator.share` rechaza con `AbortError`. No mostramos toast (evita ruido). Si `canShare` devuelve false o la API falla por otra razón, cae al fallback de `<a download>`.
+Tres caminos:
 
-Toasts diferentes según el camino:
-- `'imagen guardada'` si el share se completó (mobile)
-- `'descarga lista'` si fue download directo (desktop)
-- nada si se canceló el share sheet
+1. **iOS** → **Web Share API** (`navigator.share({ files })`). El share sheet de iOS tiene una acción nativa **"Guardar imagen"** que escribe directo al carrete de Photos. Es **la única vía web** para que el archivo termine ahí — `<a download>` solo lo manda a Files/Descargas, donde la app Fotos no lo ve.
+2. **Android con `showSaveFilePicker`** (Chromium ≥ 86, Edge, Brave, Samsung Internet ≥ 14) → **File System Access API**. Abre un picker nativo con `startIn: 'pictures'` para sugerir la carpeta `Pictures/`, que **sí es indexada por Google Photos**. El browser recuerda la última carpeta elegida, así que la fricción es one-time. El `suggestedName` ya viene con el `_NN` de `nextDownloadName()`. Retorna `'saved'`.
+3. **Fallback** (Android Firefox / cualquier browser sin Web Share ni FSA / desktop) → `<a download>` tradicional → carpeta `Descargas` del browser. Retorna `'downloaded'`.
+
+### Por qué NO usamos Web Share en Android
+
+Esto es el corazón del bug que llevó a este split. En Android, el share sheet del sistema lista **apps instaladas con intent filter para `image/*`** — WhatsApp, Telegram, Drive, Gmail, etc. **No existe una acción nativa "Guardar en Galería"** equivalente a la de iOS. El usuario ve un grid de apps, no encuentra "fotos/galería", y termina mandándolo a Drive o cancelando. Percepción: "el botón descargar no funciona".
+
+Aún si el usuario eligiera "Files" en el share sheet, el archivo iría a `Descargas/`, que **Google Photos NO escanea por default** (solo escanea `DCIM/Camera` y carpetas explícitamente marcadas como "device folders"). La galería del fabricante (Samsung Gallery, MIUI Gallery) sí suele escanear `Descargas/`, pero Google Photos — la app "Fotos" del usuario promedio Android — no.
+
+Por eso en Android saltamos directo a `showSaveFilePicker`, que sí permite escribir a `Pictures/` (carpeta estándar que Google Photos indexa).
+
+### Por qué `showSaveFilePicker` y no, p. ej., un OPFS/IndexedDB cache
+
+`showSaveFilePicker` es la única API web estándar que escribe **al filesystem real del usuario en una ubicación elegible por él**. OPFS es una sandbox virtual del browser, invisible a otras apps. La File System Access API requiere un user gesture (lo tenemos: el click en `#download` es el trigger) y el browser delega el path al usuario, así que no hay riesgo de seguridad ni permisos extra.
+
+### Toasts según el camino
+
+- `'shared'` (iOS share sheet completado) → `'imagen guardada'`
+- `'saved'` (Android FSA picker completado) → `'imagen guardada'`
+- `'downloaded'` en **Android** → `'guardada en Descargas — moverla a Pictures para verla en Fotos'` con `durationMs: 6000` (es información accionable, vale el extra de tiempo en pantalla)
+- `'downloaded'` en **desktop / otros** → `'descarga lista'`
+- `'cancelled'` (usuario cierra el share sheet o el save picker) → sin toast (evita ruido)
+
+### Errores y fallthrough
+
+Tanto `navigator.share` como `showSaveFilePicker` rechazan con `AbortError` si el usuario cancela. Cualquier otro error (`SecurityError`, `NotAllowedError`, sharing failure por permisos rotos, etc.) cae al `<a download>` final. El usuario siempre termina con un archivo en algún lado — nunca se queda sin nada.
+
+### Anti-patrón evitado
+
+La versión antigua hacía `if (matchMedia('(hover: none)').matches && canShare)` indiscriminadamente para cualquier touch device. Eso funcionaba en iOS y rompía silenciosamente la expectativa de los usuarios Android. Ahora la rama Web Share está **gated por `isIOSDevice`** explícito.
+
+Si en algún momento Web Share API en Android añade una opción nativa "Save to Gallery" (no parece probable a corto plazo — la propia spec lo deja en manos del OS), volver a evaluar el split.
+
+### Override por query param para testing
+
+`?platform=ios|android|desktop` en la URL fuerza el branch correspondiente sin importar el dispositivo real. Sigue el mismo precedente del `?debug=1` HUD documentado en `mobile-ux.md` postmortem #7. Útil para:
+
+- Testear el flujo Android (`?platform=android`) desde Chromium desktop sin un handset real — `showSaveFilePicker` está disponible nativamente en Chrome/Edge/Brave desktop, así que el picker de `Pictures/` se dispara igual.
+- Testear el fallback `'guardada en Descargas...'` toast (Android Firefox path) desde un browser desktop sin la API.
+- Verificar que el flujo iOS (`?platform=ios`) cae al fallback `<a download>` cuando `canShare` no está disponible (desktop).
+
+Implementación: las dos constantes `isIOSDevice` y `isAndroidDevice` consultan primero `URLSearchParams(location.search).get('platform')`. Si está, ganan; si no, detección normal por UA + `maxTouchPoints`. Nunca un usuario real va a tipear el query param — es zero-risk en producción.
+
+Las constantes se evalúan **una sola vez al cargar el módulo**. Cambiar el query param requiere recargar la página. Mismo limite si haces UA spoofing via DevTools.
+
+### Cookbook — matriz de validación desde Chrome desktop
+
+Sin tocar un device real, los cuatro caminos de `saveImage` se cubren así:
+
+| Caso a validar | Setup | Resultado esperado |
+|---|---|---|
+| Android con FSA (Chromium) | `?platform=android` | Picker nativo `Save As` abierto en `Pictures/` con el filename pre-cargado. Confirmar → toast `'imagen guardada'`. Cancelar → sin toast. |
+| Android sin FSA (Firefox / Samsung Internet viejo) | `?platform=android` + en consola: `delete window.showSaveFilePicker` antes de cliquear descargar | Cae a `<a download>` clásico + toast `'guardada en Descargas — moverla a Pictures...'` durante 6 s. |
+| iOS share sheet | Necesita Safari (mac 16.4+ o iPhone). Chrome desktop no tiene `canShare`, así que cae al fallback. | Safari mac: share sheet. Chrome desktop con `?platform=ios`: fallback `<a download>` + toast `'descarga lista'`. |
+| Desktop normal | Sin query param o `?platform=desktop` | `<a download>` + toast `'descarga lista'`. |
+
+Validado manualmente en abril 2026 (Chrome 124 macOS) — los cuatro caminos pasan, incluido el sub-caso del `delete window.showSaveFilePicker` que confirma que el toast educativo de Android se muestra correctamente cuando la API no está disponible.
 
 ## Reset (con undo)
 
