@@ -2,7 +2,11 @@
 <html lang="es">
   <head>
     <meta charset="UTF-8" />
-    <meta name="viewport" content="width=device-width, initial-scale=1.0" />
+    <!-- maximum-scale + user-scalable disable the browser's native pinch-to-zoom
+         on the page. We have our own zoom system on the canvas, and disabling
+         the browser one prevents fixed elements (zoom bar, tools panel) from
+         floating off-screen during a pinch gesture. -->
+    <meta name="viewport" content="width=device-width, initial-scale=1.0, maximum-scale=1.0, user-scalable=no" />
     <meta name="theme-color" content="#0a0a0a" />
 
     <!-- SEO — positioned as a free Lightroom alternative for desktop -->
@@ -12,6 +16,12 @@
     <meta name="author" content="Gerardo Garavito" />
     <meta name="robots" content="index, follow" />
     <link rel="canonical" href="https://imagen.garavito.dev/" />
+    <!-- Same URL serves both Spanish and English speakers (UI is in Spanish but
+         the SEO content covers both). hreflang tells search engines this page
+         is locale-flexible. -->
+    <link rel="alternate" hreflang="es" href="https://imagen.garavito.dev/" />
+    <link rel="alternate" hreflang="en" href="https://imagen.garavito.dev/" />
+    <link rel="alternate" hreflang="x-default" href="https://imagen.garavito.dev/" />
 
     <!-- Icon -->
     <link rel="icon" type="image/png" href="/favicon.png" />
@@ -126,6 +136,10 @@
       </div>
     </main>
 
+    <!-- Floating hint container. Text + visibility controlled by HINTS.ab in
+         src/config.ts — empty string = stays hidden, no JS, no CSS impact. -->
+    <p id="ab-hint" class="ab-hint" hidden></p>
+
     <div id="zoom" class="zoom" hidden>
       <button id="zoom-out" title="alejar (-)" aria-label="alejar">−</button>
       <span id="zoom-level">100%</span>
@@ -143,7 +157,12 @@
           <button data-tab="crop" class="tab">recortar</button>
           <button data-tab="export" class="tab">exportar</button>
         </nav>
-        <button id="reset" class="ghost">reset</button>
+        <div class="reset-group">
+          <button id="reset" class="ghost">reset</button>
+          <div class="reset-group__menu" role="menu">
+            <button id="change-image" class="dropdown-item" role="menuitem" type="button">cambiar imagen</button>
+          </div>
+        </div>
       </header>
 
       <div class="panel" data-panel="curves">

@@ -265,3 +265,26 @@ export function parseAspect(s: string): number | null {
   if (!w || !h) return null;
   return w / h;
 }
+
+/**
+ * Compose a previously-applied crop with a new one to produce a single crop in
+ * the ORIGINAL source's coordinate system. Used for session persistence — we
+ * save the cumulative crop in original coords so we can re-derive the current
+ * source from the original blob on reload, regardless of how many sub-crops the
+ * user applied.
+ *
+ *  - `previous`: existing applied crop (in original-source pixel coords), or null
+ *  - `next`:     newly-applied crop (in CURRENT-source pixel coords, which is
+ *                itself the slice defined by `previous`)
+ *
+ * Returns the new cumulative crop in original-source pixel coords.
+ */
+export function composeAppliedCrop(previous: CropBox | null, next: CropBox): CropBox {
+  if (!previous) return { x: next.x, y: next.y, w: next.w, h: next.h };
+  return {
+    x: previous.x + next.x,
+    y: previous.y + next.y,
+    w: next.w,
+    h: next.h,
+  };
+}

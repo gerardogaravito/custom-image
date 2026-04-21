@@ -27,14 +27,15 @@ src/style.css          # all styles, no preprocessor
 src/types.ts           # State, Adjust, Curves types + defaults
 src/curves.ts          # monotonic-cubic LUT builder + curve widget (mountCurves)
 src/pipeline.ts        # apply(src, state): ImageData → ImageData (pixel ops + blur + noise)
-src/crop.ts            # pure crop math (resize/move/fit + cropImageData)
+src/crop.ts            # pure crop math (resize/move/fit + cropImageData + composeAppliedCrop)
 src/heic.ts            # HEIC detection + lazy heic2any conversion
 src/toast.ts           # toast utility (with optional inline action button)
 src/undo.ts            # UndoStack<T> + History<T> (past + future)
-src/main.ts            # upload, preview/export rAF loop, UI wiring, undo/redo, zoom, analytics
+src/persist.ts         # IndexedDB session save/load/clear
+src/main.ts            # upload, preview/export rAF loop, UI wiring, undo/redo, zoom, analytics, persist
 ```
 
-Feature-specific docs live alongside this one: `zoom.md`, `recortar.md`, `rendering.md`, `herramientas.md`, `undo.md`, `seo.md`, `tests.md`.
+Feature-specific docs live alongside this one: `zoom.md`, `recortar.md`, `rendering.md`, `herramientas.md`, `undo.md`, `persist.md`, `seo.md`, `tests.md`.
 
 ## Key design decisions
 

@@ -1,15 +1,21 @@
 <?xml version="1.0" encoding="UTF-8"?>
 <urlset xmlns="http://www.sitemaps.org/schemas/sitemap/0.9"
-        xmlns:image="http://www.google.com/schemas/sitemap-image/1.1">
+        xmlns:image="http://www.google.com/schemas/sitemap-image/1.1"
+        xmlns:xhtml="http://www.w3.org/1999/xhtml">
   <url>
     <loc>https://imagen.garavito.dev/</loc>
     <lastmod>2026-04-20</lastmod>
     <changefreq>monthly</changefreq>
     <priority>1.0</priority>
+    <!-- Same URL serves both Spanish and English speakers. hreflang signals
+         to search engines that the page is multilingual / locale-flexible. -->
+    <xhtml:link rel="alternate" hreflang="es" href="https://imagen.garavito.dev/" />
+    <xhtml:link rel="alternate" hreflang="en" href="https://imagen.garavito.dev/" />
+    <xhtml:link rel="alternate" hreflang="x-default" href="https://imagen.garavito.dev/" />
     <image:image>
       <image:loc>https://imagen.garavito.dev/og.png</image:loc>
-      <image:title>imagen.garavito.dev — alternativa gratis a Lightroom</image:title>
-      <image:caption>Editor de fotos profesional 100% en el navegador, sin Adobe.</image:caption>
+      <image:title>imagen.garavito.dev — Free Lightroom alternative · Alternativa gratis a Lightroom</image:title>
+      <image:caption>Free professional photo editor in your browser, no Adobe. Editor de fotos profesional 100% en el navegador, sin Adobe.</image:caption>
     </image:image>
   </url>
 </urlset>

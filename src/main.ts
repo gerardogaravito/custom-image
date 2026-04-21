@@ -13,6 +13,7 @@ injectSpeedInsights();
 import {
   type CropBox,
   type Handle,
+  composeAppliedCrop,
   cropImageData,
   fitToAspect,
   fullBox,
@@ -21,8 +22,10 @@ import {
   resizeBox,
 } from './crop';
 import { History } from './undo';
+import { type Session, clearSession, loadSession, saveSession } from './persist';
+import { HINTS } from './config';
 import type { Adjust, Curves, State, Channel } from './types';
-import { defaultAdjust, defaultCurves } from './types';
+import { defaultAdjust } from './types';
 
 const MAX_PREVIEW = 1920;
 const MAX_SOURCE = 4096;
@@ -47,6 +50,7 @@ const toolsToggle = $<HTMLButtonElement>('#tools-toggle');
 const curveCanvas = $<HTMLCanvasElement>('#curve');
 const reset = $<HTMLButtonElement>('#reset');
 
+const abHint = $<HTMLElement>('#ab-hint');
 const cropOverlay = $<HTMLDivElement>('#crop-overlay');
 const cropBoxEl = cropOverlay.querySelector<HTMLDivElement>('.crop-box')!;
 const shadeTop = cropOverlay.querySelector<HTMLDivElement>('.crop-shade--top')!;
@@ -62,6 +66,13 @@ let originalSource: ImageData | null = null;
 let originalPreview: ImageData | null = null;
 let sourceName = 'image';
 
+// Persistence state. `originalBlob` is the user's uploaded file (post-HEIC),
+// stored in IndexedDB so we can re-decode it on reload. `appliedCrop` tracks
+// the cumulative crop in ORIGINAL source-pixel coords, so re-applying it on
+// reload produces the exact same current source/preview.
+let originalBlob: Blob | null = null;
+let appliedCrop: CropBox | null = null;
+
 let isInteracting = false;
 let interactionEndTimer = 0;
 function flagInteraction() {
@@ -75,12 +86,17 @@ function flagInteraction() {
   interactionEndTimer = window.setTimeout(() => {
     isInteracting = false;
     schedule();
+    scheduleSave();  // burst ended → persist
   }, INTERACTION_RELEASE_MS);
 }
 
-const state: State = { adjust: defaultAdjust(), curves: defaultCurves() };
-
-const curves = mountCurves(curveCanvas, () => { state.curves = curves.state; flagInteraction(); });
+// `state.curves` and the curve widget's internal state MUST be the same
+// reference from the start. Otherwise `state.curves` points to a stale
+// `defaultCurves()` instance until the user's first curve edit triggers the
+// callback that re-aligns them — which means saves/snapshots/persistence
+// could capture the wrong object. Alias from init eliminates the race.
+const curves = mountCurves(curveCanvas, () => flagInteraction());
+const state: State = { adjust: defaultAdjust(), curves: curves.state };
 
 let rafId = 0;
 function schedule() {
@@ -227,11 +243,13 @@ async function loadImage(f: File): Promise<void> {
   originalSource = source;
   originalPreview = preview;
   cropBox = null;
+  appliedCrop = null;
   rebuildInteractivePreview();
 
   sourceName = f.name.replace(/\.[^.]+$/, '') || 'image';
   drop.hidden = true;
   setToolsHidden(false);
+  maybeShowEscHint();
   zoomBar.hidden = false;
   // Reset history on a fresh image so we don't restore stale buffers
   history.clear();
@@ -408,7 +426,11 @@ async function handleFile(f: File | null | undefined): Promise<void> {
         dismiss();
       }
     }
+    // Capture the post-HEIC blob so the persisted session re-decodes the same
+    // pixels (avoids re-doing the heic2any WASM round-trip on reload).
+    originalBlob = input;
     await loadImage(input);
+    scheduleSave();
   } catch (err) {
     console.error('[loadImage]', err);
     const msg = err instanceof Error ? err.message : 'Error desconocido al cargar la imagen.';
@@ -421,6 +443,16 @@ file.addEventListener('change', () => {
   // reset so the same file can be picked again
   file.value = '';
   void handleFile(f);
+});
+
+// "cambiar imagen" — opens the same file picker as the drop zone, so the user
+// can swap the loaded image without refreshing.
+$<HTMLButtonElement>('#change-image').addEventListener('click', (e) => {
+  file.click();
+  // Take focus off the button so the parent .reset-group's `:focus-within`
+  // releases and the dropdown collapses. Without this, cancelling the file
+  // picker leaves the menu open until the user clicks somewhere else.
+  (e.currentTarget as HTMLButtonElement).blur();
 });
 
 // Only fire programmatic file.click() when the user clicks the drop zone
@@ -501,6 +533,39 @@ window.addEventListener('error', (ev) => {
   toast(ev.message || 'Error inesperado', { kind: 'error' });
 });
 
+// ----------------------------------------------------------------------------
+// A/B hint (floating discoverability nudge for the dblclick-to-toggle gesture)
+// ----------------------------------------------------------------------------
+// Driven by HINTS.ab in src/config.ts: empty string = the hint never shows.
+// Set HINTS.ab to a non-empty text → it appears once per session whenever the
+// tools panel becomes visible, regardless of active tab. Auto-dismiss at 10s
+// or on click.
+
+let abHintShown = false; // once-per-session — no nag
+let abHintTimer = 0;
+
+function showAbHint() {
+  if (abHintShown) return;
+  if (!HINTS.ab) return; // disabled by config — skip render entirely
+  abHintShown = true;
+  abHint.textContent = HINTS.ab;
+  // Position right below the tools panel (its height varies per active tab)
+  const r = tools.getBoundingClientRect();
+  abHint.style.top = `${r.bottom + 8}px`;
+  abHint.hidden = false;
+  requestAnimationFrame(() => abHint.classList.add('is-in'));
+  abHintTimer = window.setTimeout(dismissAbHint, HINTS.abDurationSeconds * 1000);
+}
+
+function dismissAbHint() {
+  clearTimeout(abHintTimer);
+  if (abHint.hidden) return;
+  abHint.classList.remove('is-in');
+  setTimeout(() => { abHint.hidden = true; }, 200);
+}
+
+abHint.addEventListener('click', dismissAbHint);
+
 // Tabs
 $$('.tab').forEach((btn) => {
   btn.addEventListener('click', () => {
@@ -539,25 +604,77 @@ function syncSliderInputs() {
   });
 }
 
+// For each slider, remember the value at the START of the most recent
+// interaction burst. The double-click handler swaps current ↔ this value, so
+// the user can "blink" between the last two positions to compare A/B.
+// Initialized to the defaults so a dblclick BEFORE any edit acts as a reset.
+const previousValue = new Map<keyof Adjust, number>();
+{
+  const def = defaultAdjust();
+  for (const k of Object.keys(def) as Array<keyof Adjust>) previousValue.set(k, def[k]);
+}
+
 $$<HTMLInputElement>('input[data-adj]').forEach((inp) => {
   const key = inp.dataset.adj as keyof Adjust;
   const val = $<HTMLElement>(`[data-val="${key}"]`);
   inp.addEventListener('input', () => {
+    // First input event of a fresh burst — record the pre-burst value
+    if (!isInteracting) previousValue.set(key, state.adjust[key]);
     state.adjust[key] = Number(inp.value);
     if (val) val.textContent = inp.value;
     flagInteraction();
   });
 });
 
-// Double-click on the value indicator → reset that slider to its default.
-$$<HTMLElement>('i[data-val]').forEach((el) => {
-  el.addEventListener('dblclick', () => {
-    const key = el.dataset.val as keyof Adjust;
-    const def = defaultAdjust()[key];
-    if (state.adjust[key] === def) return;
-    setSliderValue(key, def);
-    flagInteraction();
-  });
+// A/B toggle: swap current ↔ previous value of one slider, so the user can
+// flip between two positions to compare. First double-click after an edit
+// goes back to the pre-edit value; second goes forward; and so on.
+function toggleSliderValue(key: keyof Adjust) {
+  const previous = previousValue.get(key) ?? defaultAdjust()[key];
+  const current = state.adjust[key];
+  if (previous === current) return;
+  pushUndo();
+  setSliderValue(key, previous);
+  previousValue.set(key, current); // next toggle swaps back
+  schedule();
+  scheduleSave();
+}
+
+// Two paths to the same A/B toggle, picked by gesture cost:
+//  - Single CLICK on the label (`<span>`) — cheap, lighter intent. The label
+//    is "passive" UI text, so a click feels natural and there's nothing else
+//    to accidentally trigger.
+//  - Double CLICK on the value indicator (`<i>`) or the slider itself
+//    (`<input type="range">`) — more deliberate, prevents accidental toggles
+//    on the active controls users hover/drag often.
+//
+// Edge case for slider: dblclicking the TRACK fires an input event first (the
+// click moves the slider). The toggle then swaps to the previous value, so
+// effectively the click gets "reverted" — consistent with toggle semantics.
+// Dblclicking the THUMB doesn't move the value, swap is clean.
+//
+// Event delegation on the adjust panel — robust if more sliders are added.
+function dispatchToggle(e: Event) {
+  const target = e.target as HTMLElement;
+  const sl = target.closest('.sl');
+  const valEl = sl?.querySelector<HTMLElement>('[data-val]');
+  if (!valEl) return;
+  toggleSliderValue(valEl.dataset.val as keyof Adjust);
+}
+
+$<HTMLElement>('.panel[data-panel="adjust"]').addEventListener('click', (e) => {
+  const target = e.target as HTMLElement;
+  if (!target.matches('.sl span')) return;
+  // The wrapping <label> would otherwise focus the slider input as a side
+  // effect (default label behavior). preventDefault keeps focus where it was.
+  e.preventDefault();
+  dispatchToggle(e);
+});
+
+$<HTMLElement>('.panel[data-panel="adjust"]').addEventListener('dblclick', (e) => {
+  const target = e.target as HTMLElement;
+  if (!target.matches('.sl i[data-val], .sl input[data-adj]')) return;
+  dispatchToggle(e);
 });
 
 // Reset (uses the undo system below)
@@ -565,9 +682,9 @@ reset.addEventListener('click', () => {
   pushUndo();
   state.adjust = defaultAdjust();
   curves.reset();
-  state.curves = curves.state;
   syncSliderInputs();
   schedule();
+  scheduleSave();
   toast('ajustes restaurados', {
     kind: 'info',
     action: { label: 'undo', onClick: undo },
@@ -858,6 +975,8 @@ $<HTMLButtonElement>('#crop-apply').addEventListener('click', () => {
   };
   preview = cropImageData(preview, cropBox);
   source = cropImageData(source, sourceBoxPx);
+  // Compose the cumulative crop in original-source coords for persistence.
+  appliedCrop = composeAppliedCrop(appliedCrop, sourceBoxPx);
   // Stay in crop mode and reset the box to the new full bounds. The pre-apply
   // snapshot (pushed by the capture-phase listener below) keeps the previous
   // box, so undo restores both source/preview AND the user's last selection.
@@ -867,6 +986,7 @@ $<HTMLButtonElement>('#crop-apply').addEventListener('click', () => {
   setZoom('fit');
   schedule();
   requestAnimationFrame(() => updateZoomLabel());
+  scheduleSave();
   toast('recorte aplicado', {
     kind: 'success',
     action: { label: 'undo', onClick: undo },
@@ -878,6 +998,7 @@ $<HTMLButtonElement>('#crop-reset').addEventListener('click', () => {
   pushUndo();
   source = originalSource;
   preview = originalPreview;
+  appliedCrop = null;
   rebuildInteractivePreview();
   cropBox = preview ? fullBox({ w: preview.width, h: preview.height }) : null;
   setZoom('fit');
@@ -886,6 +1007,7 @@ $<HTMLButtonElement>('#crop-reset').addEventListener('click', () => {
     updateZoomLabel();
     if (cropActive) syncOverlay();
   });
+  scheduleSave();
   toast('imagen restaurada al original', {
     kind: 'success',
     action: { label: 'undo', onClick: undo },
@@ -902,11 +1024,14 @@ type Snapshot = {
   source: ImageData;
   preview: ImageData;
   interactivePreview: ImageData | null;
-  // Crop state must be in the snapshot too — otherwise undoing a "aplicar"
+  // Crop state must be in the snapshot too — otherwise undoing an "aplicar"
   // restored source/preview but lost the user's selection box.
   cropBox: CropBox | null;
   cropAspectKey: string;
   cropOrient: 'portrait' | 'landscape';
+  // Cumulative crop in original-source coords. Has to round-trip too so
+  // persistence stays consistent after undo/redo.
+  appliedCrop: CropBox | null;
 };
 
 const history = new History<Snapshot>(20);
@@ -930,19 +1055,21 @@ function makeSnapshot(): Snapshot {
     cropBox: cropBox ? { ...cropBox } : null,
     cropAspectKey,
     cropOrient,
+    appliedCrop: appliedCrop ? { ...appliedCrop } : null,
   };
 }
 
 function applySnapshot(snap: Snapshot) {
   state.adjust = { ...snap.adjust };
   curves.setState(snap.curves);
-  state.curves = curves.state;
+  // No need to reassign state.curves — it shares the widget's state reference
   source = snap.source;
   preview = snap.preview;
   interactivePreview = snap.interactivePreview;
   cropBox = snap.cropBox ? { ...snap.cropBox } : null;
   cropAspectKey = snap.cropAspectKey;
   cropOrient = snap.cropOrient;
+  appliedCrop = snap.appliedCrop ? { ...snap.appliedCrop } : null;
   recomputeCropAspect();
   syncCropAspectButtons();
   syncCropOrientButtons();
@@ -952,6 +1079,7 @@ function applySnapshot(snap: Snapshot) {
   // restored box. (cropActive itself is not snapshotted — we don't force-switch
   // tabs on undo.)
   if (cropActive && preview) syncOverlay();
+  scheduleSave();
 }
 
 function pushUndo() {
@@ -992,9 +1120,144 @@ function syncToolsToggleLabel() {
   toolsToggle.textContent = tools.hidden ? 'menu' : 'ocultar';
 }
 
+// First-time discoverability hint for the ESC shortcut. Only on desktop
+// (touch devices have the "menu" button right there in the zoom bar) and only
+// once per session — we don't want to nag.
+let escHintShown = false;
+function maybeShowEscHint() {
+  if (escHintShown) return;
+  if (!matchMedia('(hover: hover)').matches) return;
+  escHintShown = true;
+  toast('ESC para ocultar el menú', { kind: 'info', durationMs: 5000 });
+}
+
 function setToolsHidden(hidden: boolean) {
   tools.hidden = hidden;
+  // The crop overlay floats on top of the canvas — without the panel that
+  // controls it, it has no business being there. Hide it with the panel and
+  // restore it when the panel comes back (only if the user was in crop mode).
+  if (cropActive) {
+    cropOverlay.hidden = hidden;
+    if (!hidden) syncOverlay();
+  }
+  // The A/B hint anchors to tools.bottom — pointless when tools is hidden.
+  if (hidden) dismissAbHint();
+  else showAbHint();
   syncToolsToggleLabel();
 }
 
 toolsToggle.addEventListener('click', () => setToolsHidden(!tools.hidden));
+
+// ----------------------------------------------------------------------------
+// Session persistence (IndexedDB)
+// ----------------------------------------------------------------------------
+
+const SAVE_DEBOUNCE_MS = 400;
+let saveTimer = 0;
+
+/**
+ * Persist the current session. Debounced so a slider drag (which fires many
+ * state updates) only writes once after the burst settles.
+ */
+function scheduleSave() {
+  if (!originalBlob || !source || !preview) return;
+  clearTimeout(saveTimer);
+  saveTimer = window.setTimeout(() => {
+    void saveSession({
+      schemaVersion: 1,
+      sourceName,
+      blob: originalBlob!,
+      appliedCrop: appliedCrop ? { ...appliedCrop } : null,
+      state: {
+        adjust: { ...state.adjust },
+        curves: deepCopyCurves(state.curves),
+      },
+    });
+  }, SAVE_DEBOUNCE_MS);
+}
+
+/**
+ * Decode the saved blob, re-apply the saved crop (if any), and restore state.
+ * On any failure we wipe the session — corrupted data is worse than no data.
+ */
+async function restoreSession(saved: Session): Promise<void> {
+  const file = new File([saved.blob], saved.sourceName, { type: saved.blob.type });
+  if (!isImageFile(file)) throw new Error('saved file is not an image');
+
+  const bmp = await bitmapFromFile(file);
+  const w = 'naturalWidth' in bmp ? bmp.naturalWidth : bmp.width;
+  const h = 'naturalHeight' in bmp ? bmp.naturalHeight : bmp.height;
+  if (!w || !h) throw new Error('saved image has invalid dimensions');
+
+  const src = fitCanvas(w, h, MAX_SOURCE);
+  const prev = fitCanvas(w, h, MAX_PREVIEW);
+
+  const c1 = makeCanvas(src.w, src.h);
+  c1.ctx.drawImage(bmp as CanvasImageSource, 0, 0, src.w, src.h);
+  source = c1.ctx.getImageData(0, 0, src.w, src.h);
+
+  const c2 = makeCanvas(prev.w, prev.h);
+  c2.ctx.drawImage(bmp as CanvasImageSource, 0, 0, prev.w, prev.h);
+  preview = c2.ctx.getImageData(0, 0, prev.w, prev.h);
+
+  if ('close' in bmp && typeof bmp.close === 'function') bmp.close();
+
+  originalSource = source;
+  originalPreview = preview;
+  originalBlob = saved.blob;
+  appliedCrop = saved.appliedCrop ? { ...saved.appliedCrop } : null;
+
+  // Re-apply the saved crop to derive the current source/preview.
+  if (appliedCrop) {
+    source = cropImageData(source, appliedCrop);
+    const previewBox: CropBox = {
+      x: (appliedCrop.x * preview.width) / originalSource.width,
+      y: (appliedCrop.y * preview.height) / originalSource.height,
+      w: (appliedCrop.w * preview.width) / originalSource.width,
+      h: (appliedCrop.h * preview.height) / originalSource.height,
+    };
+    preview = cropImageData(preview, previewBox);
+  }
+
+  rebuildInteractivePreview();
+
+  // Restore editing state. `curves.setState` mutates the widget's internal
+  // state in place — and `state.curves` shares that reference (set at init).
+  state.adjust = { ...saved.state.adjust };
+  curves.setState(saved.state.curves);
+  syncSliderInputs();
+
+  // Clear the in-progress crop UI to defaults — we don't persist that
+  cropBox = null;
+  cropAspectKey = 'free';
+  cropOrient = 'portrait';
+  recomputeCropAspect();
+  syncCropAspectButtons();
+  syncCropOrientButtons();
+
+  // History starts fresh — restored state is the new baseline
+  history.clear();
+
+  sourceName = saved.sourceName;
+  drop.hidden = true;
+  setToolsHidden(false);
+  zoomBar.hidden = false;
+  setZoom('fit');
+  schedule();
+  requestAnimationFrame(() => updateZoomLabel());
+
+  toast(`sesión restaurada — ${sourceName}`, { kind: 'info', durationMs: 2500 });
+}
+
+// Boot: try to restore a saved session. If anything goes wrong, wipe and
+// continue with the empty-state UI.
+void (async () => {
+  const saved = await loadSession();
+  if (!saved) return;
+  try {
+    await restoreSession(saved);
+  } catch (err) {
+    console.error('[restore] session restore failed', err);
+    await clearSession();
+  }
+})();

@@ -2,6 +2,7 @@ import { describe, it, expect } from 'vitest';
 import {
   type CropBox,
   anchorOf,
+  composeAppliedCrop,
   cropImageData,
   fitToAspect,
   fullBox,
@@ -214,5 +215,46 @@ describe('cropImageData', () => {
     const src = makeImage(8, 8, (x) => [x * 30, 0, 0, 137]);
     const out = cropImageData(src, { x: 0, y: 0, w: 4, h: 4 });
     for (let i = 3; i < out.data.length; i += 4) expect(out.data[i]).toBe(137);
+  });
+});
+
+describe('composeAppliedCrop — cumulative crop math for persistence', () => {
+  it('returns a copy of next when previous is null', () => {
+    const next: CropBox = { x: 10, y: 20, w: 100, h: 80 };
+    const out = composeAppliedCrop(null, next);
+    expect(out).toEqual(next);
+    expect(out).not.toBe(next); // independent reference
+  });
+
+  it('translates next by previous origin (single composition)', () => {
+    const previous: CropBox = { x: 50, y: 30, w: 200, h: 150 };
+    const next: CropBox     = { x: 10, y: 20, w:  80, h:  60 };
+    const out = composeAppliedCrop(previous, next);
+    // The sub-crop should land at (50+10, 30+20) in original coords
+    expect(out).toEqual({ x: 60, y: 50, w: 80, h: 60 });
+  });
+
+  it('uses next dimensions, not previous', () => {
+    // Even when shrinking, the new w/h is what matters for the cumulative box
+    const previous: CropBox = { x: 0, y: 0, w: 1000, h: 1000 };
+    const next: CropBox     = { x: 100, y: 100, w: 50, h: 50 };
+    const out = composeAppliedCrop(previous, next);
+    expect(out.w).toBe(50);
+    expect(out.h).toBe(50);
+  });
+
+  it('chained composition (3 successive crops) lands at the right place', () => {
+    let acc: CropBox | null = null;
+    acc = composeAppliedCrop(acc, { x: 100, y: 100, w: 800, h: 600 });
+    acc = composeAppliedCrop(acc, { x:  50, y:  50, w: 400, h: 300 });
+    acc = composeAppliedCrop(acc, { x:  25, y:  25, w: 200, h: 150 });
+    expect(acc).toEqual({ x: 175, y: 175, w: 200, h: 150 });
+  });
+
+  it('does not mutate the previous box', () => {
+    const previous: CropBox = { x: 50, y: 30, w: 200, h: 150 };
+    const before = { ...previous };
+    composeAppliedCrop(previous, { x: 10, y: 10, w: 50, h: 50 });
+    expect(previous).toEqual(before);
   });
 });

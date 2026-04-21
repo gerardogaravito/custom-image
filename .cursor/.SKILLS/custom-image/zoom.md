@@ -92,6 +92,16 @@ Sin el `rAF` el scroll se aplica con dimensiones viejas y el punto se desplaza.
 
 `loadImage()` siempre llama `setZoom('fit')` después de generar el preview, así el usuario empieza viendo la foto completa sin importar el estado anterior. Después de `schedule()`, un `rAF` adicional refresca el label porque el porcentaje "fit" depende de las dimensiones intrínsecas del canvas, que se setean dentro del `rAF` del schedule.
 
+## Mobile: pinch-zoom del browser deshabilitado
+
+El `<meta name="viewport">` incluye `maximum-scale=1.0, user-scalable=no`. Esto deshabilita el pinch-to-zoom **nativo del navegador** sobre la página. Trade-off consciente:
+
+**Por qué**: durante un pinch nativo, los elementos `position: fixed` (zoom bar, tools panel) flotan en posiciones extrañas y a veces salen de la pantalla durante el gesto. Como tenemos nuestro propio sistema de zoom completo (botones, atajos, wheel), permitir el pinch del browser arriba duplica funcionalidad y rompe layout.
+
+**Trade-off de a11y**: usuarios con baja visión que dependen del pinch del browser para magnificar el sitio no podrán hacerlo. En este caso aceptado porque (a) el contenido principal es una imagen, no texto, (b) tenemos zoom propio explícito con botones grandes y atajos, (c) el chrome tiene tamaños tipográficos cómodos por defecto.
+
+`#zoom` también tiene `z-index: 50` (más alto que tools=10 y crop overlay=5) para garantizar que esté siempre arriba.
+
 ## Constantes (tune-points)
 
 Todas en `src/main.ts`:

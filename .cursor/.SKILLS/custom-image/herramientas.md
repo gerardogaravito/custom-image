@@ -64,11 +64,17 @@ Sin gimnasias. El `is-active` solo cambia colores (fondo `--accent`, texto `--bg
 
 El handler genérico lee `data-adj` para saber qué propiedad de `state.adjust` actualizar y `data-val` para encontrar el `<i>` que muestra el valor en vivo. Agregar un slider nuevo es solo HTML — el JS lo encuentra solo.
 
-### Doble click sobre el valor → reset al default
+### Doble click sobre el valor → toggle A/B
 
-El `<i data-val>` tiene `cursor: pointer` y un `:hover` que lo pinta con accent — son pistas visuales. Doble click resetea ese slider al valor de `defaultAdjust()[key]` (en general 0; `noiseSat` arranca en 50). Solo ese slider, no toca los demás.
+El `<i data-val>` tiene `cursor: pointer` y un `:hover` que lo pinta con accent — son pistas visuales.
 
-Implementado con un único listener delegado que itera los `<i data-val>` y mapea a su `data-adj` correspondiente.
+**Comportamiento**: cada slider mantiene un `previousValue.get(key)` (Map) con el valor justo ANTES del último burst de interacción. El doble click hace **swap entre el valor actual y ese previo** — pestañear entre dos posiciones para A/B compare. Después del swap, el valor anterior se actualiza al que estaba antes, así un segundo doble click vuelve al primero.
+
+Inicialización: `previousValue` arranca con los defaults para todas las keys, así un doble click sin haber editado nada actúa como reset al default (caso degenerado pero útil).
+
+Tracking del previous value: en el handler `input` del slider, **antes** de aplicar el cambio nuevo, si `!isInteracting` (primer evento del burst) se guarda `state.adjust[key]` actual en el Map. Las llamadas subsiguientes del mismo drag NO sobreescriben (porque ya estamos en burst). Cuando el burst termina (después de `INTERACTION_RELEASE_MS`), `isInteracting` vuelve a false; el siguiente input arranca un nuevo burst y guarda el valor pre-burst.
+
+El swap también pushea undo + dispara save — consistente con cualquier otro cambio.
 
 ### Divider antes de los sliders de ruido
 
@@ -151,6 +157,27 @@ El panel se cierra en cualquiera de estas formas:
 - `ESC` en desktop.
 
 `setToolsHidden(hidden: boolean)` es la única función que muta `tools.hidden`, así el label del botón se mantiene sincronizado siempre.
+
+**Importante**: `setToolsHidden` también esconde el **crop overlay** cuando el panel se oculta (si el usuario estaba en modo crop). Sin esto, el rectángulo con la regla de tres seguía flotando sobre la imagen sin la UI que lo controla. Al re-mostrar el panel, restaura el overlay y llama `syncOverlay()` por si hubo resize/scroll mientras estaba oculto.
+
+### Hint de ESC al primer render (desktop only)
+
+`maybeShowEscHint()` se llama dentro de `loadImage()` justo después de mostrar las herramientas por primera vez. Muestra un toast discreto `"ESC para ocultar el menú"` por 5 segundos.
+
+Reglas:
+- Solo desktop (`matchMedia('(hover: hover)')`). En mobile la gente no tiene teclado, además el botón "menu" en la zoom bar ya está visible y es obvio.
+- **Solo una vez por sesión** (flag `escHintShown`). El propósito es discoverability del shortcut, no nag al usuario.
+- Si recargás la página el flag se resetea — lo verás otra vez en la próxima sesión.
+
+## Cambiar imagen sin recargar
+
+Botón `#change-image` en un dropdown que aparece debajo de `#reset` al hacer hover (desktop) o siempre visible (mobile, `@media (hover: none)`). Click llama `file.click()` que dispara el mismo file picker del drop zone.
+
+CSS: `.reset-group` es el wrapper, `.reset-group__menu` el dropdown — `position: absolute; top: 100%`. Hover y `:focus-within` lo despliegan con un fade-in suave (120ms). En touch devices se queda visible permanentemente porque hover no existe ahí.
+
+**Bug histórico — focus stickiness**: al clickear el botón se le daba foco; `:focus-within` mantenía el dropdown abierto indefinidamente, incluso si el usuario cancelaba el file picker. **Fix**: el handler llama `e.currentTarget.blur()` después de `file.click()`. Sin esto, el menú quedaba pegado hasta que el usuario clickeara en otro lado.
+
+**Nota técnica**: el handler `file.value = ''` en el listener de `change` ya manejaba el caso de seleccionar el mismo archivo dos veces. Cambiar imagen solo reusa esa infra — no necesita lógica nueva.
 
 ## Atajos relacionados
 

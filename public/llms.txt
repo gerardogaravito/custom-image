@@ -1,14 +1,67 @@
 # imagen.garavito.dev
 
-> **Alternativa gratis a Adobe Lightroom para desktop.** Editor de fotos profesional 100% en el navegador, sin registro, sin subscripción de Adobe Creative Cloud, sin subir archivos a ningún servidor. Curvas RGB, ajustes (exposición, brillo, contraste, luces, sombras, saturación, ruido), recorte estilo iPhone Photos, conversión automática de HEIC, exportación PNG/JPG con escala personalizada.
+> **Free Lightroom alternative for desktop. Alternativa gratis a Adobe Lightroom para desktop.**
+> Professional photo editor 100% in the browser. No signup, no Adobe Creative Cloud subscription, no uploads.
+> Editor de fotos profesional 100% en el navegador. Sin registro, sin subscripción de Adobe Creative Cloud, sin subir archivos.
 
-## Por qué existe
+---
+
+## English
+
+### Why it exists
+
+Lightroom Mobile is free with reasonable limits; **Lightroom Desktop only ships with Adobe's Photography Plan at USD 9.99/month** (minimum). There's no free desktop version. So the author — who uses Lightroom on mobile — built this editor to get the same basic adjustments on a computer without paying a subscription or installing anything.
+
+It doesn't replace full Lightroom (no cataloging, shared presets, sync, AI denoise). **It replaces the "Edit" panel** for cases where you just need to tweak a photo quickly and export it.
+
+### What to use it for
+
+- **Lightroom Desktop replacement** when you only need basic adjustments (and don't want to pay the subscription).
+- Quick edits without installing anything or creating an account.
+- Precise curves (master + R/G/B per-channel) like Lightroom's Tone Curve.
+- Crop photos with specific aspect ratios (1:1, 4:5, 16:9, etc.) like the iPhone Photos editor.
+- Convert iPhone HEIC to PNG/JPG without uploading anywhere.
+- Apply controllable cinematic grain/noise (mono or color).
+
+### Quick comparison with Lightroom
+
+| Feature                       | imagen.garavito.dev    | Lightroom Desktop |
+|-------------------------------|------------------------|-------------------|
+| Price                         | Free                   | USD 9.99/mo       |
+| Account required              | No                     | Yes (Adobe ID)    |
+| Installation                  | No (runs in browser)   | Yes (~1 GB)       |
+| Processing                    | 100% local             | Local + Cloud     |
+| RGB curves                    | Yes                    | Yes               |
+| Exposure / contrast           | Yes                    | Yes               |
+| Aspect-ratio crop             | Yes                    | Yes               |
+| HEIC → PNG/JPG                | Yes                    | Yes               |
+| Presets / collections         | No                     | Yes               |
+| AI denoise                    | No                     | Yes               |
+| Cross-device sync             | No                     | Yes               |
+| Photo cataloging              | No                     | Yes               |
+
+### Stack and privacy
+
+- **Stack**: Vite + vanilla TypeScript. No React, no server, no API. Small bundle (~12 kB gzip) — image processing runs with `ImageData` + `Canvas` directly in the browser.
+- **Privacy**: images never leave the device. No backend receives uploads. The `heic2any` library (when needed) decodes HEIC in-browser via WASM (libheif).
+- **Open source**: code at https://github.com/gerardogaravito/custom-image
+
+### URL
+
+- App: https://imagen.garavito.dev
+- Author: https://garavito.dev
+
+---
+
+## Español
+
+### Por qué existe
 
 Lightroom mobile es gratis con limitaciones razonables; **Lightroom desktop solo viene con el Photography Plan de Adobe a USD 9.99/mes** (mínimo). No hay versión gratis para desktop. Así que el autor — que usa Lightroom en mobile — armó este editor para tener los mismos ajustes básicos en una computadora sin pagar subscripción ni instalar nada.
 
 No reemplaza a Lightroom completo (no tiene catalogación, presets compartidos, sync, ni AI denoise). **Reemplaza el panel "Edit" de Lightroom** para los casos en que solo necesitás ajustar una foto rápido y exportarla.
 
-## Para qué usarlo
+### Para qué usarlo
 
 - **Reemplazo de Lightroom desktop** cuando solo necesitás ajustes básicos (no querés pagar la subscripción).
 - Edición rápida sin instalar nada ni crear cuenta.
@@ -17,7 +70,7 @@ No reemplaza a Lightroom completo (no tiene catalogación, presets compartidos, 
 - Convertir HEIC del iPhone a PNG/JPG sin subirlo a ningún sitio.
 - Aplicar grano/ruido cinematográfico controlable (mono o color).
 
-## Comparación rápida con Lightroom
+### Comparación rápida con Lightroom
 
 | Feature                  | imagen.garavito.dev    | Lightroom Desktop |
 |--------------------------|------------------------|-------------------|
@@ -25,22 +78,22 @@ No reemplaza a Lightroom completo (no tiene catalogación, presets compartidos, 
 | Cuenta requerida         | No                     | Sí (Adobe ID)     |
 | Instalación              | No (corre en browser)  | Sí (~1 GB)        |
 | Procesamiento            | 100% local             | Local + Cloud     |
-| Curvas RGB               | ✅                     | ✅                |
-| Exposición / contraste   | ✅                     | ✅                |
-| Recorte aspect ratios    | ✅                     | ✅                |
-| HEIC → PNG/JPG           | ✅                     | ✅                |
-| Presets / colecciones    | ❌                     | ✅                |
-| AI denoise               | ❌                     | ✅                |
-| Sync entre dispositivos  | ❌                     | ✅                |
-| Catalogación de fotos    | ❌                     | ✅                |
+| Curvas RGB               | Sí                     | Sí                |
+| Exposición / contraste   | Sí                     | Sí                |
+| Recorte aspect ratios    | Sí                     | Sí                |
+| HEIC → PNG/JPG           | Sí                     | Sí                |
+| Presets / colecciones    | No                     | Sí                |
+| AI denoise               | No                     | Sí                |
+| Sync entre dispositivos  | No                     | Sí                |
+| Catalogación de fotos    | No                     | Sí                |
 
-## Stack y privacidad
+### Stack y privacidad
 
-- **Stack**: Vite + TypeScript vanilla. Sin React, sin servidor, sin API. Bundle pequeño (~10 kB gzip) y la lógica de procesamiento de imagen corre con `ImageData` + `Canvas` directo en el navegador.
+- **Stack**: Vite + TypeScript vanilla. Sin React, sin servidor, sin API. Bundle pequeño (~12 kB gzip) y la lógica de procesamiento de imagen corre con `ImageData` + `Canvas` directo en el navegador.
 - **Privacidad**: las imágenes nunca salen del dispositivo. No hay backend que reciba uploads. La librería `heic2any` (cuando se necesita) descodifica HEIC también en el browser vía WASM (libheif).
 - **Open source**: código en https://github.com/gerardogaravito/custom-image
 
-## URL
+### URL
 
 - App: https://imagen.garavito.dev
 - Autor: https://garavito.dev
