@@ -372,7 +372,7 @@ Phase 1 tenía un timer (3 s) que volvía a mostrar el chrome. Phase 3 no — qu
 
 ### Postmortem — bugs detectados después del deploy inicial de Phase 3
 
-Cuatro bugs salieron al testear en iPhone real. Fix en el mismo commit que el doc.
+Cinco bugs salieron al testear en iPhone real. Fix en el mismo commit que el doc.
 
 **1. El menú no aparecía aunque cliquearas "menu"**
 
@@ -397,7 +397,9 @@ function setToolsHidden(hidden: boolean) {
 
 Causa: `.tools__bar` con `position: fixed; left: 0; right: 0` (full viewport width) tiene `display: flex` con 4 tabs + reset + dropdown permanente (`hover: none` mantiene "cambiar imagen" siempre visible). En iPhones chicos el ancho natural del contenido excedía el viewport, generando scroll horizontal en el body. Cuando el usuario intentaba arrastrar un slider con el dedo, el browser interpretaba el gesto horizontal como pan del body antes de llegar al `<input type="range">`.
 
-Fix: clamp del ancho a `min(100vw, 320px)` en `.tools__bar` y `.panel`, centrados con `left: 50%; transform: translateX(-50%)`. Coincide con el ancho fijo del panel desktop (320 px) y nunca excede el viewport. La animación de hide combina ambos transforms: `translateX(-50%) translateY(±8px)`.
+Fix: clamp del ancho a `max-width: 320px` en `.tools__bar` y `.panel`, centrados con `left: 0; right: 0; margin-inline: auto`. Coincide con el ancho fijo del panel desktop (320 px) y nunca excede el viewport.
+
+> Nota: la versión inicial del fix usaba `left: 50%; transform: translateX(-50%); width: min(100vw, 320px)`. Se cambió a margin-based centering por bug #5 (ver abajo) — `transform` ahora se reserva exclusivamente para la animación de slide.
 
 **3. Pinch sobre el chrome explotaba la UI a tamaño absurdo**
 
@@ -434,7 +436,7 @@ Refuerzo defensivo independiente del fix: además de `opacity: 0` y `pointer-eve
   opacity: 0;
   pointer-events: none;
   visibility: hidden;
-  transform: translateX(-50%) translateY(-8px);
+  transform: translateY(-8px);
   transition: opacity 160ms ease, transform 160ms ease,
               visibility 0s linear 160ms;
 }
@@ -442,6 +444,39 @@ Refuerzo defensivo independiente del fix: además de `opacity: 0` y `pointer-eve
 ```
 
 También bajé la duración del fade de 200 ms → 160 ms — el "snap" se siente más responsivo en mobile sin perder la animación.
+
+**5. Doble-tap en Recortar disparaba el zoom de iOS · panel sin contenido**
+
+Síntoma A: con la pestaña Recortar activa, un doble-tap (sobre el crop overlay, los botones de aspect ratio o el chrome) hacía que iOS Safari escalara la página entera, igual que el bug #3 pero por una vía distinta — el doble-tap-zoom, no el pinch.
+
+Síntoma B (relacionado): al mostrar el menú, sólo aparecía el bar de tabs en la parte de arriba, pero el contenido del panel (sliders, botones de aspect, etc.) no renderizaba abajo.
+
+Causa A: bug #3 había bloqueado pinch en `.tools__bar`, `.zoom` y `.panel`, pero no había nada que bloqueara el doble-tap-zoom de iOS, que es un gesto separado del pinch. `touch-action: pan-y` en `.panel` debería bloquearlo según spec, pero iOS Safari tiene bugs históricos donde `pan-y` deja escapar el doble-tap. El `<meta name="viewport" user-scalable=no maximum-scale=1>` también es ignorado por iOS por accesibilidad. La única forma confiable de bloquearlo a nivel global es `touch-action: manipulation` en el `<html>` — disabilita doble-tap-zoom site-wide pero permite `tap`/`click` y respeta los descendientes que tengan `touch-action` más restrictivo (e.g. `.panel` con `pan-y` sigue bloqueando pinch interno; `#viewport` con `none` sigue capturando todo manualmente).
+
+Causa B: hipótesis principal — bug de compositing en iOS Safari. `.panel` tenía `position: fixed` + `backdrop-filter: blur` + `transform: translateX(-50%)` (para el centrado) **más** `transform: translateX(-50%) translateY(8px)` (para el estado oculto). Las dos transforms aplicadas a un elemento con backdrop-filter en iOS pueden disparar bugs de compositing donde el descendant subtree no pinta. El bar (mismo stack) renderizaba bien algunas veces y mal otras, lo que apuntaba a un bug de compositor, no de layout.
+
+Fix:
+
+```css
+html { touch-action: manipulation; }   /* defensa global iOS doble-tap */
+
+.crop-overlay { touch-action: none; }  /* belt-and-suspenders del bug #3 */
+
+/* Centrado por margin, no por transform — frees `transform` para el slide */
+.tools__bar, .panel {
+  left: 0;
+  right: 0;
+  max-width: 320px;
+  margin-inline: auto;
+}
+
+.is-menu-hidden .tools__bar { transform: translateY(-8px); }   /* sin compound */
+.is-menu-hidden .panel      { transform: translateY(8px); }
+```
+
+Por qué `manipulation` en `<html>` y no en `<body>`: el efectivo `touch-action` se computa por intersección de ancestros. Poniéndolo en `<html>` cubre absolutamente todo el subtree, incluso elementos que se monten dinámicamente fuera de `<body>` (no es nuestro caso, pero es defensivo). `<body>` también funcionaría — la diferencia es semántica.
+
+Por qué `manipulation` y no `pan-y` en html: `pan-y` permite scroll vertical (lo cual ya tenemos `overflow: hidden` en body, así que sería contradictorio); `manipulation` permite tap + pan + pinch pero bloquea doble-tap-zoom — es el balance correcto. Pinch se sigue bloqueando vía `gesturestart/change/end` document-level (§ 6) y vía `touch-action: none` en cada elemento del chrome (§ 7 bug #3).
 
 ## Roadmap restante
 

@@ -70,6 +70,18 @@ body {
   text-size-adjust: 100%;
 }
 
+html {
+  /* iOS Safari ignores `user-scalable=no` + `maximum-scale=1` from the viewport
+     meta for accessibility. `touch-action: manipulation` is the only reliable
+     way to disable the OS-level double-tap-to-zoom gesture site-wide while
+     still allowing taps and clicks. Pinch is separately blocked via the
+     document-level gesturestart/change/end preventDefault in main.ts.
+     Descendants with stricter values (e.g. #viewport: none, .panel: pan-y)
+     are still respected — touch-action effective value is the intersection of
+     ancestor rules. See mobile-ux.md § 7 postmortem #4 (Recortar double-tap). */
+  touch-action: manipulation;
+}
+
 button,
 input,
 select {
@@ -489,6 +501,12 @@ select {
   position: absolute;
   pointer-events: none;
   z-index: 5;
+  /* Belt-and-suspenders: #viewport already has touch-action:none, but iOS
+     Safari has been observed to leak the double-tap-zoom gesture when it
+     lands on the crop box (which has its own pointer handlers and toggles
+     pointer-events). Explicit touch-action here pins the behavior even if
+     the browser's gesture detector takes a different code path. */
+  touch-action: none;
 }
 .crop-overlay.is-active {
   pointer-events: auto;
@@ -823,9 +841,18 @@ select {
   .tools__bar {
     position: fixed;
     top: calc(max(12px, env(safe-area-inset-top, 12px)) + 44px);
-    left: 50%;
-    transform: translateX(-50%);
-    width: min(100vw, 320px);
+    /* Centering via `left:0; right:0; margin-inline:auto` instead of
+       `transform: translateX(-50%)`. Two reasons:
+       1) Frees `transform` for the slide animation (no compound transforms
+          to keep in sync between idle/hidden states — easy to forget).
+       2) iOS Safari has historically had compositing bugs where a fixed
+          element with both `backdrop-filter` AND a 2D transform fails to
+          paint its descendants on certain rotations / safe-area events.
+          Margin-based centering avoids the second transform entirely. */
+    left: 0;
+    right: 0;
+    max-width: 320px;
+    margin-inline: auto;
     z-index: 11;
     background: rgba(17, 17, 17, 0.85);
     backdrop-filter: blur(16px) saturate(140%);
@@ -848,12 +875,20 @@ select {
   .panel {
     /* Active tab content as a translucent bottom sheet anchored to the
        bottom edge. Inactive panels still have `hidden` attr → display:none.
-       Same width clamp + centering as the bar. */
+       Same centering model as the bar (margin-inline auto, no transform). */
     position: fixed;
     bottom: 0;
-    left: 50%;
-    transform: translateX(-50%);
-    width: min(100vw, 320px);
+    left: 0;
+    right: 0;
+    max-width: 320px;
+    margin-inline: auto;
+    /* Explicit display:flex matches the desktop base rule. position:fixed
+       doesn't reset `display`, so this is redundant — but keeping it
+       explicit prevents a regression if a future refactor moves the base
+       `.panel { display: flex }` rule into a more specific selector. */
+    display: flex;
+    flex-direction: column;
+    gap: 10px;
     z-index: 11;
     max-height: 50vh;
     overflow-y: auto;
@@ -877,13 +912,13 @@ select {
   /* Hidden state: fade out + small slide away from the canvas, then flip
      to visibility:hidden once the transition completes (delay matches the
      opacity duration). pointer-events:none also clears so touches pass
-     through to the canvas underneath. The transform combines the centering
-     (translateX -50%) with the slide (translateY ±8px). */
+     through to the canvas underneath. transform is now used SOLELY for the
+     slide (no compound centering) — see comment on .tools__bar above. */
   .is-menu-hidden .tools__bar {
     opacity: 0;
     pointer-events: none;
     visibility: hidden;
-    transform: translateX(-50%) translateY(-8px);
+    transform: translateY(-8px);
     transition: opacity 160ms ease, transform 160ms ease,
                 visibility 0s linear 160ms;
   }
@@ -891,7 +926,7 @@ select {
     opacity: 0;
     pointer-events: none;
     visibility: hidden;
-    transform: translateX(-50%) translateY(8px);
+    transform: translateY(8px);
     transition: opacity 160ms ease, transform 160ms ease,
                 visibility 0s linear 160ms;
   }
