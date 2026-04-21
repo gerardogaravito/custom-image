@@ -1364,12 +1364,20 @@ function maybeShowEscHint() {
 
 function setToolsHidden(hidden: boolean) {
   // Mobile: body class drives a CSS opacity+transform fade; the panel stays
-  // in the DOM so the next tap can re-show it without a re-render. Desktop:
-  // the `hidden` attribute removes it from the layout entirely (the corner
-  // panel doesn't need to animate).
+  // in the DOM so the next tap can re-show it without a re-render. The
+  // `hidden` attribute MUST stay cleared — it would force display:none and
+  // win over any CSS, leaving the toggle visually no-op (this was the bug
+  // where the panel "didn't appear" after a reload because the HTML ships
+  // `<section ... hidden>` and we never cleared it on mobile).
+  // Desktop: use the attribute (display:none) — no animation needed and the
+  // corner panel doesn't benefit from a fade. Clear the body class on the
+  // opposite layout so a layout switch (rotate, resize) doesn't leave stale
+  // state behind.
   if (isMobileLayout()) {
+    tools.hidden = false;
     document.body.classList.toggle('is-menu-hidden', hidden);
   } else {
+    document.body.classList.remove('is-menu-hidden');
     tools.hidden = hidden;
   }
   // The crop overlay floats on top of the canvas — without the panel that

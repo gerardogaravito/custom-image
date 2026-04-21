@@ -370,6 +370,55 @@ Mobile usa la body class (porque queremos opacidad y los hijos quedan en el DOM)
 
 Phase 1 tenía un timer (3 s) que volvía a mostrar el chrome. Phase 3 no — quitar el chrome es una intención persistente, no un peek temporal. Restaurar requiere acción explícita (tap, ESC, botón). Esto es coherente con cómo se comporta la mayoría de apps mobile (Photos no auto-restaura el bottom strip al pasar 3 s).
 
+### Postmortem — bugs detectados después del deploy inicial de Phase 3
+
+Tres bugs salieron al testear en iPhone real. Fix en el mismo commit que el doc.
+
+**1. El menú no aparecía aunque cliquearas "menu"**
+
+Causa: `<section id="tools" class="tools" hidden>` arranca con el atributo `hidden` en el HTML. Mi `setToolsHidden` mobile sólo togglea `body.is-menu-hidden` y nunca tocaba `tools.hidden`. Resultado: `tools.hidden` quedaba `true` para siempre en mobile → `display: none` en la `<section>` → los hijos `position: fixed` (bar y panel) **nunca renderizaban**, sin importar lo que hiciera el body class.
+
+Fix: en el branch mobile, forzar `tools.hidden = false` antes de tocar la clase. Mobile usa la clase para visibilidad, no el atributo. Branch desktop limpia la clase del body por las dudas (rotación / resize cambia layout).
+
+```ts
+function setToolsHidden(hidden: boolean) {
+  if (isMobileLayout()) {
+    tools.hidden = false;            // crítico — sin esto el HTML hidden gana
+    document.body.classList.toggle('is-menu-hidden', hidden);
+  } else {
+    document.body.classList.remove('is-menu-hidden');
+    tools.hidden = hidden;
+  }
+  // …
+}
+```
+
+**2. Scroll horizontal accidental al mover sliders**
+
+Causa: `.tools__bar` con `position: fixed; left: 0; right: 0` (full viewport width) tiene `display: flex` con 4 tabs + reset + dropdown permanente (`hover: none` mantiene "cambiar imagen" siempre visible). En iPhones chicos el ancho natural del contenido excedía el viewport, generando scroll horizontal en el body. Cuando el usuario intentaba arrastrar un slider con el dedo, el browser interpretaba el gesto horizontal como pan del body antes de llegar al `<input type="range">`.
+
+Fix: clamp del ancho a `min(100vw, 320px)` en `.tools__bar` y `.panel`, centrados con `left: 50%; transform: translateX(-50%)`. Coincide con el ancho fijo del panel desktop (320 px) y nunca excede el viewport. La animación de hide combina ambos transforms: `translateX(-50%) translateY(±8px)`.
+
+**3. Tap-to-hide se quedaba en "muy transparente" pero no escondía**
+
+Síntoma: el panel se ponía a opacidad muy baja pero seguía interceptando toques / tapando visualmente la imagen. Causa primaria: bug #1 — el `<section>` con `hidden` attr nunca renderizaba, pero el fade no era observable porque no había nada que esconder; el usuario lo describía como "transparente" probablemente al ver el último frame antes de que el class lo apagara visualmente.
+
+Refuerzo defensivo independiente del fix: además de `opacity: 0` y `pointer-events: none`, agregar `visibility: hidden` con transición `0s linear 160ms` (delay = duración del fade). El elemento queda categóricamente fuera del árbol visible una vez completado el fade — no más estado intermedio "casi invisible pero ahí".
+
+```css
+.is-menu-hidden .tools__bar {
+  opacity: 0;
+  pointer-events: none;
+  visibility: hidden;
+  transform: translateX(-50%) translateY(-8px);
+  transition: opacity 160ms ease, transform 160ms ease,
+              visibility 0s linear 160ms;
+}
+/* Show side: visibility instantáneo (0s linear 0s) para que el fade-in se vea desde el primer frame. */
+```
+
+También bajé la duración del fade de 200 ms → 160 ms — el "snap" se siente más responsivo en mobile sin perder la animación.
+
 ## Roadmap restante
 
 - **F. Bottom sheet con snap points** — el `.panel` actual es estático con `max-height: 50vh`. F sería convertirlo en un drawer drag-to-snap (collapsed / mid / full). Cambio mayor — requiere agregar pointer handlers al `.panel` que coexistan con pan/pinch en el canvas y el scroll vertical interno del propio panel. Considerar sólo si el feedback pide más control.

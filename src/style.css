@@ -801,28 +801,43 @@ select {
     overflow: visible;
   }
 
+  /* Width model: clamp to the desktop fixed width (320 px) so the chrome
+     never grows wider than the controls actually need; on phones narrower
+     than that, fill the screen so we don't waste edge real estate.
+     Centered horizontally — looks intentional on both ends and matches the
+     visual weight users expect from a floating panel. Without this clamp
+     the bar's natural content (4 tabs + reset + permanent dropdown) used
+     to overflow the viewport on smaller iPhones, producing horizontal
+     scroll — and the user trying to drag a slider would scroll the page
+     instead. See bug report in mobile-ux.md § 7. */
   .tools__bar {
-    /* Sit right under the zoom bar (zoom is at safe-area-top + ~12px and
-       ~36px tall, so ~56px from the top covers the gap comfortably). */
     position: fixed;
     top: calc(max(12px, env(safe-area-inset-top, 12px)) + 44px);
-    left: 0;
-    right: 0;
+    left: 50%;
+    transform: translateX(-50%);
+    width: min(100vw, 320px);
     z-index: 11;
     background: rgba(17, 17, 17, 0.85);
     backdrop-filter: blur(16px) saturate(140%);
     -webkit-backdrop-filter: blur(16px) saturate(140%);
-    border-bottom: 1px solid var(--line);
-    transition: opacity 200ms ease, transform 200ms ease;
+    border: 1px solid var(--line);
+    /* visibility cleared on the same delay as opacity so the panel is
+       categorically gone (not just transparent) once the fade completes —
+       prevents the "very transparent but didn't really hide" feel. */
+    visibility: visible;
+    transition: opacity 160ms ease, transform 160ms ease,
+                visibility 0s linear 0s;
   }
 
   .panel {
     /* Active tab content as a translucent bottom sheet anchored to the
-       bottom edge. Inactive panels still have `hidden` attr → display:none. */
+       bottom edge. Inactive panels still have `hidden` attr → display:none.
+       Same width clamp + centering as the bar. */
     position: fixed;
     bottom: 0;
-    left: 0;
-    right: 0;
+    left: 50%;
+    transform: translateX(-50%);
+    width: min(100vw, 320px);
     z-index: 11;
     max-height: 50vh;
     overflow-y: auto;
@@ -831,21 +846,33 @@ select {
     backdrop-filter: blur(16px) saturate(140%);
     -webkit-backdrop-filter: blur(16px) saturate(140%);
     border-top: 1px solid var(--line);
-    transition: opacity 200ms ease, transform 200ms ease;
+    border-left: 1px solid var(--line);
+    border-right: 1px solid var(--line);
+    visibility: visible;
+    transition: opacity 160ms ease, transform 160ms ease,
+                visibility 0s linear 0s;
   }
 
-  /* Hidden state: fade out + small slide away from the canvas. The chrome
-     stays in the DOM (tap-to-toggle re-shows it), pointer-events:none lets
-     touches pass through to the canvas underneath. */
+  /* Hidden state: fade out + small slide away from the canvas, then flip
+     to visibility:hidden once the transition completes (delay matches the
+     opacity duration). pointer-events:none also clears so touches pass
+     through to the canvas underneath. The transform combines the centering
+     (translateX -50%) with the slide (translateY ±8px). */
   .is-menu-hidden .tools__bar {
     opacity: 0;
     pointer-events: none;
-    transform: translateY(-8px);
+    visibility: hidden;
+    transform: translateX(-50%) translateY(-8px);
+    transition: opacity 160ms ease, transform 160ms ease,
+                visibility 0s linear 160ms;
   }
   .is-menu-hidden .panel {
     opacity: 0;
     pointer-events: none;
-    transform: translateY(8px);
+    visibility: hidden;
+    transform: translateX(-50%) translateY(8px);
+    transition: opacity 160ms ease, transform 160ms ease,
+                visibility 0s linear 160ms;
   }
 
   .zoom {
